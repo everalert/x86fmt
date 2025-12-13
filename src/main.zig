@@ -84,83 +84,91 @@ pub fn Format(
     const col_ops: usize = col_ins + gap_ops;
     const col_labins: usize = gap_ins;
     const col_labops: usize = col_labins + gap_ops;
-    var utf8it = std.unicode.Utf8Iterator{ .bytes = scratch.items, .i = 0 };
-    var line_state: LineState = .Label;
+
     var token_buf: [1024]u21 = undefined;
     var line_buf: [1024]u21 = undefined;
     var tokens = std.ArrayListUnmanaged(u21).initBuffer(&token_buf);
     var line = std.ArrayListUnmanaged(u21).initBuffer(&line_buf);
-    var b_label: bool = false;
-    var b_state_initialized: bool = false;
-    while (utf8it.nextCodepoint()) |codepoint| {
-        var c = codepoint;
-        var next_s: LineState = .Comment;
-        line_state = switch (line_state) {
-            .Label => ls: {
-                c = SkipWhitespace(&utf8it, c);
-                c = ConsumeUntilCharacter(&utf8it, &tokens, c, &[_]u21{ '\t', ' ', ':', ';' });
 
-                // FIXME: handle linebreak
-                if (c == ':') {
-                    b_label = true;
-                    next_s = .Instruction;
-                    tokens.appendAssumeCapacity(c);
-                } else { // if not followed by ':', assume it's an instruction
+    var line_it = std.mem.tokenizeAny(u8, scratch.items, "\n");
+    while (line_it.next()) |line_s| {
+        var b_label: bool = false;
+        var b_state_initialized: bool = false;
+        var line_state: LineState = .Label;
+
+        var utf8it = std.unicode.Utf8Iterator{ .bytes = line_s, .i = 0 };
+        while (utf8it.nextCodepoint()) |codepoint| {
+            var c = codepoint;
+            var next_s: LineState = .Comment;
+            line_state = switch (line_state) {
+                .Label => ls: {
+                    c = SkipWhitespace(&utf8it, c);
+                    c = ConsumeUntilCharacter(&utf8it, &tokens, c, &[_]u21{ '\t', ' ', ':', ';' });
+
+                    if (c == ':') {
+                        b_label = true;
+                        next_s = .Instruction;
+                        tokens.appendAssumeCapacity(c);
+                    } else { // if not followed by ':', assume it's an instruction
+                        if (c != ';') next_s = .Operands;
+                        PadSpaces(&line, col_ins);
+                    }
+                    line.appendSliceAssumeCapacity(tokens.items);
+                    break :ls EndLinePart(&tokens, &b_state_initialized, next_s);
+                },
+                .Instruction => ls: {
+                    if (!b_state_initialized) {
+                        b_state_initialized = true;
+                        PadSpaces(&line, if (b_label) col_labins else col_ins);
+                    }
+                    c = SkipWhitespace(&utf8it, c);
+                    c = ConsumeUntilCharacter(&utf8it, &tokens, c, &[_]u21{ '\t', ' ', ';' });
+
                     if (c != ';') next_s = .Operands;
-                    PadSpaces(&line, col_ins);
-                }
-                line.appendSliceAssumeCapacity(tokens.items);
-                break :ls EndLinePart(&tokens, &b_state_initialized, next_s);
-            },
-            .Instruction => ls: {
-                if (!b_state_initialized) {
-                    b_state_initialized = true;
-                    PadSpaces(&line, if (b_label) col_labins else col_ins);
-                }
-                c = SkipWhitespace(&utf8it, c);
-                c = ConsumeUntilCharacter(&utf8it, &tokens, c, &[_]u21{ '\t', ' ', ';' });
+                    line.appendSliceAssumeCapacity(tokens.items);
+                    break :ls EndLinePart(&tokens, &b_state_initialized, next_s);
+                },
+                .Operands => ls: {
+                    if (!b_state_initialized) {
+                        b_state_initialized = true;
+                        PadSpaces(&line, if (b_label) col_labops else col_ops);
+                    }
+                    c = SkipWhitespace(&utf8it, c);
+                    c = ConsumeUntilCharacter(&utf8it, &tokens, c, &[_]u21{ '\t', ' ', ',', ';' });
 
-                // FIXME: handle linebreak
-                if (c != ';') next_s = .Operands;
-                line.appendSliceAssumeCapacity(tokens.items);
-                break :ls EndLinePart(&tokens, &b_state_initialized, next_s);
-            },
-            .Operands => ls: {
-                if (!b_state_initialized) {
-                    b_state_initialized = true;
-                    PadSpaces(&line, if (b_label) col_labops else col_ops);
-                }
-                c = SkipWhitespace(&utf8it, c);
-                c = ConsumeUntilCharacter(&utf8it, &tokens, c, &[_]u21{ '\t', ' ', ',', ';' });
-
-                // FIXME: handle linebreak
-                line.appendSliceAssumeCapacity(tokens.items);
-                if (c == ',' or IsWhitespace(c)) {
-                    if (c == ',') line.appendAssumeCapacity(c);
-                    tokens.clearRetainingCapacity();
-                    line.appendAssumeCapacity(32);
+                    line.appendSliceAssumeCapacity(tokens.items);
+                    if (c == ',' or IsWhitespace(c)) {
+                        if (c == ',') line.appendAssumeCapacity(c);
+                        tokens.clearRetainingCapacity();
+                        line.appendAssumeCapacity(32);
+                        break :ls line_state;
+                    }
+                    break :ls EndLinePart(&tokens, &b_state_initialized, .Comment);
+                },
+                .Comment => ls: {
+                    if (!b_state_initialized) {
+                        b_state_initialized = true;
+                        PadSpaces(&line, col_com);
+                        line.appendAssumeCapacity(';');
+                    }
+                    tokens.appendAssumeCapacity(c);
                     break :ls line_state;
-                }
-                break :ls EndLinePart(&tokens, &b_state_initialized, .Comment);
-            },
-            .Comment => ls: {
-                if (!b_state_initialized) {
-                    b_state_initialized = true;
-                    PadSpaces(&line, col_com);
-                    line.appendAssumeCapacity(';');
-                }
-                tokens.appendAssumeCapacity(c);
-                break :ls line_state;
-            },
-        };
-    }
-    line.appendSliceAssumeCapacity(tokens.items);
-    tokens.clearRetainingCapacity();
+                },
+            };
+        }
+        line.appendSliceAssumeCapacity(tokens.items);
 
-    var enc_buf: [4]u8 = undefined;
-    for (line.items) |c| {
-        const enc_len = std.unicode.utf8Encode(c, &enc_buf) catch unreachable; // FIXME: handle
-        _ = out.write(enc_buf[0..enc_len]) catch unreachable; // FIXME: handle
+        if (out.context.items.len > 0) {
+            _ = out.write("\n") catch unreachable; // FIXME: handle
+        }
+        for (line.items) |c| {
+            var enc_buf: [4]u8 = undefined;
+            const enc_len = std.unicode.utf8Encode(c, &enc_buf) catch unreachable; // FIXME: handle
+            _ = out.write(enc_buf[0..enc_len]) catch unreachable; // FIXME: handle
+        }
+
+        tokens.clearRetainingCapacity();
+        line.clearRetainingCapacity();
     }
 }
 
@@ -223,6 +231,16 @@ test "initial test to get things going plis rework/rename this later or else bro
         .{
             .i = " \t  mov eax,16; comment",
             .e = "    mov     eax, 16                     ; comment",
+        },
+        .{
+            .i =
+            \\    my_label:
+            \\mov eax,16; comment
+            ,
+            .e =
+            \\my_label:
+            \\    mov     eax, 16                     ; comment
+            ,
         },
     };
 
