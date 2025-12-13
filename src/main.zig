@@ -58,108 +58,98 @@ pub fn Format(
     out: anytype,
     settings: FormatSettings,
 ) FormatError!void {
+    std.debug.assert(settings.TabSize > 0);
+    std.debug.assert(std.math.isPowerOfTwo(settings.TabSize));
+
     var scratch = std.ArrayList(u8).init(alloc);
     defer scratch.deinit();
 
     in.readAllArrayList(&scratch, settings.ScratchSize) catch unreachable; // FIXME: handle
 
-    if (std.mem.eql(u8, scratch.items[0..3], &[3]u8{ 0xEF, 0xBB, 0xBF })) {
+    if (std.mem.startsWith(u8, scratch.items, &[3]u8{ 0xEF, 0xBB, 0xBF })) {
         return error.SourceContainsBOM;
     }
 
+    // FIXME: rework with std.mem stuff, e.g. splitting by newline, tokenizing,
+    //  and such; should be able to safely split on ASCII stuff without breaking
+    //  UTF-8 parsing.
+    // some potential gotchas:
+    //  - detecting the actual start of a comment (semicolon enclosed in string
+    //    is not a comment starter)
     // NOTE: CRLF = \r\n = 13, 10
+    const gap_ins: usize = (settings.InsMinGap + settings.TabSize - 1) & ~(settings.TabSize - 1);
+    const gap_ops: usize = (settings.OpsMinGap + settings.TabSize - 1) & ~(settings.TabSize - 1);
+    const col_com: usize = (settings.ComCol + settings.TabSize - 1) & ~(settings.TabSize - 1);
+    const col_ins: usize = settings.TabSize;
+    const col_ops: usize = col_ins + gap_ops;
+    const col_labins: usize = gap_ins;
+    const col_labops: usize = col_labins + gap_ops;
     var utf8it = std.unicode.Utf8Iterator{ .bytes = scratch.items, .i = 0 };
     var line_state: LineState = .Label;
     var token_buf: [1024]u21 = undefined;
-    var tokens = std.ArrayListUnmanaged(u21).initBuffer(&token_buf);
     var line_buf: [1024]u21 = undefined;
+    var tokens = std.ArrayListUnmanaged(u21).initBuffer(&token_buf);
     var line = std.ArrayListUnmanaged(u21).initBuffer(&line_buf);
-    var seg_start: usize = 0;
+    var b_label: bool = false;
+    var b_state_initialized: bool = false;
     while (utf8it.nextCodepoint()) |codepoint| {
+        var c = codepoint;
+        var next_s: LineState = .Comment;
         line_state = switch (line_state) {
             .Label => ls: {
-                const c = SkipLeadingWhitespace(&tokens, &utf8it, codepoint);
+                c = SkipWhitespace(&utf8it, c);
+                c = ConsumeUntilCharacter(&utf8it, &tokens, c, &[_]u21{ '\t', ' ', ':', ';' });
 
                 // FIXME: handle linebreak
-                // transition if needed
-                if (c == 58) { // ':'
+                if (c == ':') {
+                    b_label = true;
+                    next_s = .Instruction;
                     tokens.appendAssumeCapacity(c);
-                    line.appendSliceAssumeCapacity(tokens.items);
-                    PadSpaces(&line, seg_start + settings.InsMinGap);
-                    break :ls EndLinePart(&line, &tokens, &seg_start, .Instruction);
+                } else { // if not followed by ':', assume it's an instruction
+                    if (c != ';') next_s = .Operands;
+                    PadSpaces(&line, col_ins);
                 }
-                if (c == 59) { // ';'
-                    PadSpaces(&line, seg_start + settings.TabSize);
-                    line.appendSliceAssumeCapacity(tokens.items);
-                    PadSpaces(&line, settings.ComCol);
-                    line.appendAssumeCapacity(c);
-                    break :ls EndLinePart(&line, &tokens, &seg_start, .Comment);
-                }
-                if (IsWhitespace(c)) { // assume it was an Instruction if not followed by ':'
-                    PadSpaces(&line, seg_start + settings.TabSize);
-                    line.appendSliceAssumeCapacity(tokens.items);
-                    PadSpaces(&line, seg_start + settings.TabSize + settings.OpsMinGap);
-                    break :ls EndLinePart(&line, &tokens, &seg_start, .Operands);
-                }
-
-                // otherwise, keep going
-                tokens.appendAssumeCapacity(c);
-                break :ls line_state;
+                line.appendSliceAssumeCapacity(tokens.items);
+                break :ls EndLinePart(&tokens, &b_state_initialized, next_s);
             },
             .Instruction => ls: {
-                const c = SkipLeadingWhitespace(&tokens, &utf8it, codepoint);
+                if (!b_state_initialized) {
+                    b_state_initialized = true;
+                    PadSpaces(&line, if (b_label) col_labins else col_ins);
+                }
+                c = SkipWhitespace(&utf8it, c);
+                c = ConsumeUntilCharacter(&utf8it, &tokens, c, &[_]u21{ '\t', ' ', ';' });
 
                 // FIXME: handle linebreak
-                // transition if needed
-                if (c == 59) { // ';'
-                    line.appendSliceAssumeCapacity(tokens.items);
-                    PadSpaces(&line, settings.ComCol);
-                    line.appendAssumeCapacity(c);
-                    break :ls EndLinePart(&line, &tokens, &seg_start, .Comment);
-                }
-                if (IsWhitespace(c)) {
-                    line.appendSliceAssumeCapacity(tokens.items);
-                    PadSpaces(&line, seg_start + settings.OpsMinGap);
-                    break :ls EndLinePart(&line, &tokens, &seg_start, .Operands);
-                }
-
-                // otherwise, keep going
-                tokens.appendAssumeCapacity(c);
-                break :ls line_state;
+                if (c != ';') next_s = .Operands;
+                line.appendSliceAssumeCapacity(tokens.items);
+                break :ls EndLinePart(&tokens, &b_state_initialized, next_s);
             },
             .Operands => ls: {
-                var c = SkipLeadingWhitespace(&tokens, &utf8it, codepoint);
-                var queue_space: bool = false;
+                if (!b_state_initialized) {
+                    b_state_initialized = true;
+                    PadSpaces(&line, if (b_label) col_labops else col_ops);
+                }
+                c = SkipWhitespace(&utf8it, c);
+                c = ConsumeUntilCharacter(&utf8it, &tokens, c, &[_]u21{ '\t', ' ', ',', ';' });
 
                 // FIXME: handle linebreak
-                // transition if needed
-                if (IsWhitespace(c)) {
-                    line.appendSliceAssumeCapacity(tokens.items);
+                line.appendSliceAssumeCapacity(tokens.items);
+                if (c == ',' or IsWhitespace(c)) {
+                    if (c == ',') line.appendAssumeCapacity(c);
                     tokens.clearRetainingCapacity();
-                    queue_space = true;
-                    c = SkipWhitespace(&utf8it);
+                    line.appendAssumeCapacity(32);
+                    break :ls line_state;
                 }
-                if (c == 44) { // ','
-                    line.appendSliceAssumeCapacity(tokens.items);
-                    line.appendAssumeCapacity(c);
-                    tokens.clearRetainingCapacity();
-                    queue_space = true;
-                    c = SkipWhitespace(&utf8it);
-                }
-                if (c == 59) { // ';'
-                    line.appendSliceAssumeCapacity(tokens.items);
-                    PadSpaces(&line, settings.ComCol);
-                    line.appendAssumeCapacity(c);
-                    break :ls EndLinePart(&line, &tokens, &seg_start, .Comment);
-                }
-
-                // otherwise, keep going
-                if (queue_space) line.appendAssumeCapacity(32);
-                tokens.appendAssumeCapacity(c);
-                break :ls line_state;
+                break :ls EndLinePart(&tokens, &b_state_initialized, .Comment);
             },
             .Comment => ls: {
-                tokens.appendAssumeCapacity(codepoint);
+                if (!b_state_initialized) {
+                    b_state_initialized = true;
+                    PadSpaces(&line, col_com);
+                    line.appendAssumeCapacity(';');
+                }
+                tokens.appendAssumeCapacity(c);
                 break :ls line_state;
             },
         };
@@ -174,22 +164,33 @@ pub fn Format(
     }
 }
 
+// HELPERS
+
+fn ConsumeUntilCharacter(
+    utf8it: *std.unicode.Utf8Iterator,
+    tokens: *std.ArrayListUnmanaged(u21),
+    this_c: u21,
+    chars: []const u21,
+) u21 {
+    var c = this_c;
+    while (std.mem.indexOf(u21, chars, @as(*[1]u21, &c)) == null) {
+        tokens.appendAssumeCapacity(c);
+        c = utf8it.nextCodepoint() orelse break;
+    }
+    return c;
+}
+
 fn IsWhitespace(c: u21) bool {
     return c == 32 or c == 9;
 }
 
-fn SkipWhitespace(utf8it: *std.unicode.Utf8Iterator) u21 {
+fn SkipWhitespace(utf8it: *std.unicode.Utf8Iterator, c: u21) u21 {
+    if (!IsWhitespace(c)) return c;
     while (utf8it.nextCodepoint()) |next_c| {
         if (IsWhitespace(next_c)) continue;
         return next_c;
     }
-
     return 0; // FIXME: better return value?
-}
-
-fn SkipLeadingWhitespace(tokens: *std.ArrayListUnmanaged(u21), utf8it: *std.unicode.Utf8Iterator, c: u21) u21 {
-    if (tokens.items.len > 0 or !IsWhitespace(c)) return c;
-    return SkipWhitespace(utf8it);
 }
 
 fn PadSpaces(line: *std.ArrayListUnmanaged(u21), until: usize) void {
@@ -197,15 +198,16 @@ fn PadSpaces(line: *std.ArrayListUnmanaged(u21), until: usize) void {
 }
 
 fn EndLinePart(
-    line: *std.ArrayListUnmanaged(u21),
     tokens: *std.ArrayListUnmanaged(u21),
-    next_pos: *usize,
+    next_initialized: *bool,
     next_state: LineState,
 ) LineState {
+    next_initialized.* = false;
     tokens.clearRetainingCapacity();
-    next_pos.* = line.items.len;
     return next_state;
 }
+
+// TESTING
 
 // TODO: test for properly erroring at BOM
 test "initial test to get things going plis rework/rename this later or else bro" {
@@ -228,3 +230,69 @@ test "initial test to get things going plis rework/rename this later or else bro
 
     try std.testing.expectEqualStrings(data_e, output.items);
 }
+
+// NOTE: just dumping the super cool mass testing model i came up with LOL
+// -- to edit/integrate
+//const GenericArithmeticInstructionTestCase = struct { GenReg, ?i32, GenReg, ?i32, []const u8 };
+//
+//fn GenericArithmeticInstructionTest(
+//    comptime label: []const u8,
+//    comptime test_fn: *const fn (usize, GenReg, ?i32, GenReg, ?i32) callconv(.Inline) usize,
+//    comptime test_cases: []const GenericArithmeticInstructionTestCase,
+//) !void {
+//    var output: [12]u8 = undefined;
+//    const output_a = @intFromPtr(&output);
+//    inline for (test_cases, 0..) |t, i| {
+//        errdefer std.debug.print("FAILED {d:0>2} :: {s}(<addr>, .{s}, {?d}, .{s}, {?d})\n\n", .{
+//            i, label, @tagName(t[0]), t[1], @tagName(t[2]), t[3],
+//        });
+//        const expected = t[4];
+//        const output_len = test_fn(@intFromPtr(&output), t[0], t[1], t[2], t[3]) - output_a;
+//        const output_s = output[0..output_len];
+//        try std.testing.expectEqualSlices(u8, expected, output_s);
+//        try std.testing.expectEqual(expected.len, output_len);
+//    }
+//}
+//
+//// FIXME: something about this test makes zls stop autoformatting the remainder
+//// of the file, even though "zig fmt: on" is there
+//// - autoformatting works on the file up until this point
+//// - commenting between the zig fmt directives (exclusive) makes it work after fmt:on
+//// - removing the normal comments between the directives does not make it work
+//test "ADD" {
+//    try GenericArithmeticInstructionTest("ADD", &ADD, &[_]GenericArithmeticInstructionTestCase{
+//        // zig fmt: off
+//        // standard tests
+//        .{  .al, null, .imm, 0xF0, &[_]u8{       0x04,       0xF0,                                          } },
+//        .{  .ah, null, .imm, 0xF0, &[_]u8{       0x80, 0xC4, 0xF0,                                          } },
+//        .{  .al, null,  .ah, null, &[_]u8{       0x00, 0xE0,                                                } },
+//        .{  .al, 0x0F,  .cl, null, &[_]u8{       0x00, 0x48, 0x0F                                           } },
+//        .{  .al, 0xFF,  .cl, null, &[_]u8{       0x00, 0x88, 0xFF, 0x00, 0x00, 0x00                         } },
+//      //.{  .ah, 0x0F,  .cl, null, &[_]u8{       0x00, 0x4C, 0x24, 0x0F                                     } },
+//      //.{  .bh, 0x0F,  .cl, null, &[_]u8{       0x00, 0x4F, 0x0F                                           } },
+//        .{  .bl, null,  .ch, null, &[_]u8{       0x00, 0xEB,                                                } },
+//        .{  .bl, 0xF0, .imm, 0x0F, &[_]u8{       0x80, 0x83, 0xF0, 0x00, 0x00, 0x00, 0x0F                   } },
+//        .{  .ax, null, .imm, 0xF0, &[_]u8{ 0x66, 0x05,       0xF0, 0x00,                                    } },
+//        .{  .bx, null, .imm, 0xF0, &[_]u8{ 0x66, 0x81, 0xC3, 0xF0, 0x00,                                    } },
+//        .{  .ax, null,  .bx, null, &[_]u8{ 0x66, 0x01, 0xD8                                                 } },
+//        .{  .bx, 0xF0, .imm, 0x0F, &[_]u8{ 0x66, 0x83, 0x83, 0xF0, 0x00, 0x00, 0x00, 0x0F                   } },
+//        .{  .bx, 0xF0, .imm, 0xFF, &[_]u8{ 0x66, 0x81, 0x83, 0xF0, 0x00, 0x00, 0x00, 0xFF, 0x00             } },
+//        .{ .eax, null, .imm, 0xF0, &[_]u8{       0x05,       0xF0, 0x00, 0x00, 0x00                         } },
+//        .{ .ebx, null, .imm, 0xF0, &[_]u8{       0x81, 0xC3, 0xF0, 0x00, 0x00, 0x00                         } },
+//        .{ .ebp, null, .ebp, 0xF0, &[_]u8{       0x03, 0xAD, 0xF0, 0x00, 0x00, 0x00                         } },
+//        .{ .eax, null, .ebp, 0xF0, &[_]u8{       0x03, 0x85, 0xF0, 0x00, 0x00, 0x00                         } },
+//        .{ .eax, 0xF0, .ebp, null, &[_]u8{       0x01, 0xA8, 0xF0, 0x00, 0x00, 0x00                         } },
+//        .{ .eax, 0xF0, .imm, 0xFF, &[_]u8{       0x81, 0x80, 0xF0, 0x00, 0x00, 0x00, 0xFF, 0x00, 0x00, 0x00 } },
+//        .{ .eax, 0xF0, .imm, 0x0F, &[_]u8{       0x83, 0x80, 0xF0, 0x00, 0x00, 0x00, 0x0F                   } },
+//        .{ .ebx, null, .eax, null, &[_]u8{       0x01, 0xC3                                                 } },
+//        .{ .ebx, null, .imm, 0x7F, &[_]u8{       0x83, 0xC3, 0x7F                                           } },
+//        .{ .ebx, 0xF0, .ebx, null, &[_]u8{       0x01, 0x9B, 0xF0, 0x00, 0x00, 0x00                         } },
+//        // migration cases
+//        .{ .esp, null, .imm, 0x10,   &[_]u8{ 0x83, 0xC4, 0x10                   } },
+//        .{ .esp, null, .imm, 0x20,   &[_]u8{ 0x83, 0xC4, 0x20                   } },
+//        .{ .esp, null, .imm, 0x404,  &[_]u8{ 0x81, 0xC4, 0x04, 0x04, 0x00, 0x00 } },
+//        .{ .esp, null, .imm, -0x400, &[_]u8{ 0x81, 0xC4, 0x00, 0xFC, 0xFF, 0xFF } },
+//        .{ .esp, null, .imm, 0x4,    &[_]u8{ 0x83, 0xC4, 0x04                   } },
+//        // zig fmt: on
+//    });
+//}
