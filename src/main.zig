@@ -70,13 +70,14 @@ pub fn Format(
         return error.SourceContainsBOM;
     }
 
+    // FIXME: check for CRLF (rather than LF only) and mirror in output if present
+    // NOTE: CRLF = \r\n = 13, 10
     // FIXME: rework with std.mem stuff, e.g. splitting by newline, tokenizing,
     //  and such; should be able to safely split on ASCII stuff without breaking
     //  UTF-8 parsing.
     // some potential gotchas:
     //  - detecting the actual start of a comment (semicolon enclosed in string
     //    is not a comment starter)
-    // NOTE: CRLF = \r\n = 13, 10
     const gap_ins: usize = (settings.InsMinGap + settings.TabSize - 1) & ~(settings.TabSize - 1);
     const gap_ops: usize = (settings.OpsMinGap + settings.TabSize - 1) & ~(settings.TabSize - 1);
     const col_com: usize = (settings.ComCol + settings.TabSize - 1) & ~(settings.TabSize - 1);
@@ -218,26 +219,35 @@ fn EndLinePart(
 // TESTING
 
 // NOTE: see annodue x86 util for testing setup reference
-// TODO: probably migrate this to individual line component tests in future; real
-//  end-to-end test should probably pull in full source files at comptime
-// TODO: test for properly erroring at BOM
+// TODO: FormatSettings as input in FormatTestCase
+// TODO: probably migrate most of this to individual line component tests in
+//  future, although some are more generic (e.g. BOM test); also real end-to-end
+//  test should pull in source files at comptime?
 test "initial test to get things going plis rework/rename this later or else bro" {
-    const FormatTestCase = struct { i: []const u8, e: []const u8 };
+    const FormatTestCase = struct {
+        in: []const u8,
+        ex: []const u8 = &[_]u8{},
+        err: ?FormatError = null,
+    };
     const test_cases = [_]FormatTestCase{
-        .{
-            .i = " \t  my_label: mov eax,16; comment",
-            .e = "my_label:   mov     eax, 16             ; comment",
+        .{ // BOM
+            .in = &[_]u8{ 0xEF, 0xBB, 0xBF } ++ " \t  my_label: mov eax,16; comment",
+            .err = error.SourceContainsBOM,
         },
-        .{
-            .i = " \t  mov eax,16; comment",
-            .e = "    mov     eax, 16                     ; comment",
+        .{ // line with all 4
+            .in = " \t  my_label: mov eax,16; comment",
+            .ex = "my_label:   mov     eax, 16             ; comment",
         },
-        .{
-            .i =
+        .{ // no label
+            .in = " \t  mov eax,16; comment",
+            .ex = "    mov     eax, 16                     ; comment",
+        },
+        .{ // multiline with lone "label header"
+            .in =
             \\    my_label:
             \\mov eax,16; comment
             ,
-            .e =
+            .ex =
             \\my_label:
             \\    mov     eax, 16                     ; comment
             ,
@@ -248,12 +258,16 @@ test "initial test to get things going plis rework/rename this later or else bro
     for (test_cases, 0..) |t, i| {
         errdefer std.debug.print("FAILED {d:0>2}\n\n", .{i});
 
-        var input = std.io.fixedBufferStream(t.i);
+        var input = std.io.fixedBufferStream(t.in);
         var output = std.ArrayList(u8).init(std.testing.allocator);
         defer output.deinit();
 
-        try Format(std.testing.allocator, input.reader(), output.writer(), .{});
-        try std.testing.expectEqualStrings(t.e, output.items);
-        try std.testing.expectEqual(t.e.len, output.items.len);
+        const f = Format(std.testing.allocator, input.reader(), output.writer(), .{});
+        if (t.err) |ex_err| {
+            try std.testing.expectError(ex_err, f);
+        } else {
+            try std.testing.expectEqualStrings(t.ex, output.items);
+            try std.testing.expectEqual(t.ex.len, output.items.len);
+        }
     }
 }
