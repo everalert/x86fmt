@@ -1,33 +1,25 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const assert = std.debug.assert;
 
 pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    const alloc = gpa.allocator();
-
     var stdi = std.io.getStdIn();
     const stdi_br = std.io.bufferedReader(stdi.reader());
     var stdo = std.io.getStdOut();
     const stdo_bw = std.io.bufferedWriter(stdo.writer());
     defer stdo_bw.flush();
 
-    try Format(alloc, stdi_br.reader(), stdo_bw.writer(), .{});
+    try Format(stdi_br.reader(), stdo_bw.writer(), .{});
 }
+
+// TODO: ring buffer, to support line lookback
+threadlocal var ScrBufLine = std.mem.zeroes([4096]u8);
+threadlocal var OutBufLine = std.mem.zeroes([4096]u21);
+threadlocal var OutBufToken = std.mem.zeroes([256]u21);
 
 const FormatError = error{SourceContainsBOM};
 const LineState = enum { Label, Instruction, Operands, Comment };
 
-// TODO: option to enforce ascii? (error if codepoint above 127)
-// TODO: option to force label to have its own line?
-// TODO: ScratchSize may not be necessary, if the buffer is provided directly
-//  i.e. derive from buffer.len
-// TODO: maybe relax ScratchSize and simply not read the whole source at once; the
-//  original idea was to use it to dump the original input in the case of a syntax
-//  error, but maybe it's not so bad an idea to just process as many lines as
-//  possible and leave the bad ones untouched. in this case, the buffer would only
-//  need to be big enough for a few lines, to support multi-line features (e.g.
-//  lookback to get col of prior comment for alignment), but maybe even those
-//  features don't need more than one line at a time?
 const FormatSettings = struct {
     TabSize: usize = 4,
     /// Comment column, when line is not a standalone comment.
@@ -39,45 +31,20 @@ const FormatSettings = struct {
     /// Columns between start of instruction and start of operands, rounded up to
     /// the next multiple of TabSize.
     OpsMinGap: usize = 8,
-    /// Max size of buffer used to hold entire source file.
-    ScratchSize: usize = 1024 * 1024 * 2, // 2 MiB
 };
 
 // NOTE: logic based on chapter 3, 5 and 8 of the NASM documentation, with some
 //  compromises for the sake of practicality
-// NOTE: NASM accepts only non-extended ASCII or UTF-8 without BOM; in other
-//  words, it only accepts plain UTF-8
-// TODO: decide whether or not an allocator is actually appropriate to provide
-//  the scratch buffer
-/// @alloc  used to allocate scratch buffer
 /// @i      Reader to NASM source code, in a UTF-8 compatible byte stream
 /// @o      Writer to the formatted code's destination byte stream
 pub fn Format(
-    alloc: Allocator,
     in: anytype,
     out: anytype,
     settings: FormatSettings,
 ) FormatError!void {
-    std.debug.assert(settings.TabSize > 0);
-    std.debug.assert(std.math.isPowerOfTwo(settings.TabSize));
+    assert(settings.TabSize > 0);
+    assert(std.math.isPowerOfTwo(settings.TabSize));
 
-    var scratch = std.ArrayList(u8).init(alloc);
-    defer scratch.deinit();
-
-    in.readAllArrayList(&scratch, settings.ScratchSize) catch unreachable; // FIXME: handle
-
-    if (std.mem.startsWith(u8, scratch.items, &[3]u8{ 0xEF, 0xBB, 0xBF })) {
-        return error.SourceContainsBOM;
-    }
-
-    // FIXME: check for CRLF (rather than LF only) and mirror in output if present
-    // NOTE: CRLF = \r\n = 13, 10
-    // FIXME: rework with std.mem stuff, e.g. splitting by newline, tokenizing,
-    //  and such; should be able to safely split on ASCII stuff without breaking
-    //  UTF-8 parsing.
-    // some potential gotchas:
-    //  - detecting the actual start of a comment (semicolon enclosed in string
-    //    is not a comment starter)
     const gap_ins: usize = (settings.InsMinGap + settings.TabSize - 1) & ~(settings.TabSize - 1);
     const gap_ops: usize = (settings.OpsMinGap + settings.TabSize - 1) & ~(settings.TabSize - 1);
     const col_com: usize = (settings.ComCol + settings.TabSize - 1) & ~(settings.TabSize - 1);
@@ -86,18 +53,37 @@ pub fn Format(
     const col_labins: usize = gap_ins;
     const col_labops: usize = col_labins + gap_ops;
 
-    var token_buf: [1024]u21 = undefined;
-    var line_buf: [1024]u21 = undefined;
-    var tokens = std.ArrayListUnmanaged(u21).initBuffer(&token_buf);
-    var line = std.ArrayListUnmanaged(u21).initBuffer(&line_buf);
+    var tokens = std.ArrayListUnmanaged(u21).initBuffer(&OutBufToken);
+    var line = std.ArrayListUnmanaged(u21).initBuffer(&OutBufLine);
+    var b_crlf = false;
 
-    var line_it = std.mem.tokenizeAny(u8, scratch.items, "\n");
-    while (line_it.next()) |line_s| {
-        var b_label: bool = false;
-        var b_state_initialized: bool = false;
+    // FIXME: handle line read error
+    var line_i: usize = 0;
+    while (in.readUntilDelimiterOrEof(&ScrBufLine, '\n') catch unreachable) |line_s| : (line_i += 1) {
+        if (line_i == 0 and std.mem.startsWith(u8, line_s, &[3]u8{ 0xEF, 0xBB, 0xBF }))
+            return error.SourceContainsBOM;
+
+        // TODO: just always output newline after pushing line?
+        if (line_i > 0) {
+            _ = out.write(if (b_crlf) "\r\n" else "\n") catch unreachable; // FIXME: handle
+        }
+
+        b_crlf = false;
+        var b_label = false;
+        var b_state_initialized = false;
         var line_state: LineState = .Label;
 
-        var utf8it = std.unicode.Utf8Iterator{ .bytes = line_s, .i = 0 };
+        // work slice
+        const line_ws: []const u8 = ws: {
+            var line_ws = line_s;
+            if (std.mem.endsWith(u8, line_ws, "\r")) {
+                line_ws = line_ws[0 .. line_ws.len - 1];
+                b_crlf = true;
+            }
+            break :ws std.mem.trim(u8, line_ws, "\t ");
+        };
+
+        var utf8it = std.unicode.Utf8Iterator{ .bytes = line_ws, .i = 0 };
         while (utf8it.nextCodepoint()) |codepoint| {
             var c = codepoint;
             var next_s: LineState = .Comment;
@@ -159,9 +145,6 @@ pub fn Format(
         }
         line.appendSliceAssumeCapacity(tokens.items);
 
-        if (out.context.items.len > 0) {
-            _ = out.write("\n") catch unreachable; // FIXME: handle
-        }
         for (line.items) |c| {
             var enc_buf: [4]u8 = undefined;
             const enc_len = std.unicode.utf8Encode(c, &enc_buf) catch unreachable; // FIXME: handle
@@ -252,6 +235,10 @@ test "initial test to get things going plis rework/rename this later or else bro
             \\    mov     eax, 16                     ; comment
             ,
         },
+        .{ // multiline with crlf break
+            .in = "  my_label:\r\nmov eax,16; comment",
+            .ex = "my_label:\r\n    mov     eax, 16                     ; comment",
+        },
     };
 
     std.testing.log_level = .debug;
@@ -262,7 +249,7 @@ test "initial test to get things going plis rework/rename this later or else bro
         var output = std.ArrayList(u8).init(std.testing.allocator);
         defer output.deinit();
 
-        const f = Format(std.testing.allocator, input.reader(), output.writer(), .{});
+        const f = Format(input.reader(), output.writer(), .{});
         if (t.err) |ex_err| {
             try std.testing.expectError(ex_err, f);
         } else {
