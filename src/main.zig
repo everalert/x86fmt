@@ -17,6 +17,14 @@ const Token = struct {
     data: []const u8 = &[_]u8{},
 };
 
+const LineMode = enum { Blank, Unknown, Comment, Source, Macro, AsmDirective, PreProcDirective };
+
+// NOTE: assembler directives: 'primitive' directives enclosed in square brackets,
+//  'user-level' directives are bare
+// NOTE: see chapter 8 (p.101)
+/// identifiers that can appear as first word on a directive line, including aliases
+const AssemblerDirective = enum { bits, use16, use32, default, section, segment, absolute, @"extern", required, global, common, static, prefix, gprefix, lprefix, suffix, gsuffix, lsuffix, cpu, dollarhex, float, warning, list };
+
 // TODO: ring buffer, to support line lookback
 var ScrBufLine = std.mem.zeroes([4096]u8);
 var TokBufLine = std.mem.zeroes([1024]Token);
@@ -130,7 +138,86 @@ pub fn Format(
             }
         }
 
-        FormatSourceLine(&line_tok, &line, &line_ctx);
+        const line_mode: LineMode = mode: {
+            if (line_tok.items.len == 0)
+                break :mode .Blank;
+
+            const first = &line_tok.items[0];
+            var case_buf: [64]u8 = undefined;
+
+            break :mode switch (first.token) {
+                .String => str: {
+                    const lowercase = std.ascii.lowerString(&case_buf, first.data);
+
+                    const macro_names = [_][]const u8{ "%macro", "%endmacro", "%imacro" };
+                    for (macro_names) |mn| {
+                        if (mn.len != first.data.len)
+                            continue;
+
+                        if (std.mem.eql(u8, mn, lowercase))
+                            break :str .Macro;
+                    }
+
+                    if (first.data[0] == '%')
+                        break :str .PreProcDirective;
+
+                    if (std.meta.stringToEnum(AssemblerDirective, lowercase) != null)
+                        break :str .AsmDirective;
+
+                    break :str .Source;
+                },
+                .ScopeOpen => if (first.data[0] == '[') .AsmDirective else .Unknown,
+                .Semicolon => .Comment,
+                .Whitespace => unreachable, // token sequence should be pre-stripped
+                else => .Unknown,
+            };
+        };
+
+        switch (line_mode) {
+            .AsmDirective => {
+                // TODO: actually format this properly; need to format differently
+                //  for 'primitive'-type directives
+                var case_buf: [12]u8 = undefined;
+                const case = std.ascii.lowerString(&case_buf, line_tok.items[0].data);
+                line.appendSliceAssumeCapacity(case);
+
+                for (line_tok.items[1..]) |tok| {
+                    switch (tok.token) {
+                        .Whitespace => line.appendAssumeCapacity(' '),
+                        .Comma => line.appendSliceAssumeCapacity(", "),
+                        else => line.appendSliceAssumeCapacity(tok.data),
+                    }
+                }
+            },
+            .PreProcDirective => {
+                var case_buf: [12]u8 = undefined;
+                const case = std.ascii.lowerString(&case_buf, line_tok.items[0].data);
+                line.appendSliceAssumeCapacity(case);
+
+                for (line_tok.items[1..]) |tok| {
+                    switch (tok.token) {
+                        .Whitespace => line.appendAssumeCapacity(' '),
+                        .Comma => line.appendSliceAssumeCapacity(", "),
+                        else => line.appendSliceAssumeCapacity(tok.data),
+                    }
+                }
+            },
+            .Macro => {
+                var case_buf: [12]u8 = undefined;
+                const case = std.ascii.lowerString(&case_buf, line_tok.items[0].data);
+                line.appendSliceAssumeCapacity(case);
+
+                for (line_tok.items[1..]) |tok| {
+                    switch (tok.token) {
+                        .Whitespace => line.appendAssumeCapacity(' '),
+                        .Comma => line.appendSliceAssumeCapacity(", "),
+                        else => line.appendSliceAssumeCapacity(tok.data),
+                    }
+                }
+            },
+            .Source => FormatSourceLine(&line_tok, &line, &line_ctx),
+            else => {},
+        }
 
         _ = out.write(line.items) catch unreachable; // FIXME: handle
         _ = out.write(if (b_crlf) "\r\n" else "\n") catch unreachable; // FIXME: handle
@@ -148,8 +235,11 @@ const LineContext = struct {
     ColLabOps: usize, // column: operands (with label present)
 };
 
+// TODO: take tokens as a slice?
 /// takes a token list representing a "normal" nasm source line, and writes out
-/// the formatted results to a buffer. expects `out` to be empty.
+/// the formatted results to a buffer
+/// @tok    tokenized source line, in the format produced by Token-related code
+/// @out    buffer must be empty for correct formatting
 fn FormatSourceLine(
     tok: *std.ArrayListUnmanaged(Token),
     out: *std.ArrayListUnmanaged(u8),
@@ -299,6 +389,26 @@ test "initial test to get things going plis rework/rename this later or else bro
         .{ // double multiline crlf
             .in = "  my_label:\r\n\r\nmov eax,16; comment",
             .ex = "my_label:\r\n\r\n    mov     eax, 16                     ; comment\n",
+        },
+        .{ // %macro (case-insensitive)
+            .in = "%mACRO CoolMacro 2",
+            .ex = "%macro CoolMacro 2\n",
+        },
+        .{ // %imacro (case-insensitive)
+            .in = "%IMAcro CoolMacro 2",
+            .ex = "%imacro CoolMacro 2\n",
+        },
+        .{ // %endmacro (case-insensitive)
+            .in = "%enDMACro",
+            .ex = "%endmacro\n",
+        },
+        .{ // extern (assembler directive)
+            .in = "extern _SomeFunctionName@12",
+            .ex = "extern _SomeFunctionName@12\n",
+        },
+        .{ // misc preprocessor directive
+            .in = "%pragma    something",
+            .ex = "%pragma something\n",
         },
     };
 
