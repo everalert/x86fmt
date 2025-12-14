@@ -50,13 +50,17 @@ pub fn Format(
     assert(settings.TabSize > 0);
     assert(std.math.isPowerOfTwo(settings.TabSize));
 
-    const gap_ins: usize = (settings.InsMinGap + settings.TabSize - 1) & ~(settings.TabSize - 1);
-    const gap_ops: usize = (settings.OpsMinGap + settings.TabSize - 1) & ~(settings.TabSize - 1);
-    const col_com: usize = (settings.ComCol + settings.TabSize - 1) & ~(settings.TabSize - 1);
-    const col_ins: usize = settings.TabSize;
-    const col_ops: usize = col_ins + gap_ops;
-    const col_labins: usize = gap_ins;
-    const col_labops: usize = col_labins + gap_ops;
+    const line_ctx: LineContext = ctx: {
+        const gap_ins: usize = (settings.InsMinGap + settings.TabSize - 1) & ~(settings.TabSize - 1);
+        const gap_ops: usize = (settings.OpsMinGap + settings.TabSize - 1) & ~(settings.TabSize - 1);
+        var ctx: LineContext = undefined;
+        ctx.ColCom = (settings.ComCol + settings.TabSize - 1) & ~(settings.TabSize - 1);
+        ctx.ColIns = settings.TabSize;
+        ctx.ColOps = ctx.ColIns + gap_ops;
+        ctx.ColLabIns = gap_ins;
+        ctx.ColLabOps = ctx.ColLabIns + gap_ops;
+        break :ctx ctx;
+    };
 
     var line = std.ArrayListUnmanaged(u8).initBuffer(&OutBufLine);
     var line_tok = std.ArrayListUnmanaged(Token).initBuffer(&TokBufLine);
@@ -68,9 +72,6 @@ pub fn Format(
             return error.SourceContainsBOM;
 
         var b_crlf = false;
-        var b_label = false;
-        var b_state_initialized = false;
-        var line_state: LineState = .Label;
 
         // work slice
         const line_ws: []const u8 = ws: {
@@ -87,7 +88,6 @@ pub fn Format(
             const start_i = tokgen_it.i;
             const c = tokgen_it.nextCodepoint() orelse break :tokgen;
             var token: *Token = line_tok.addOneAssumeCapacity();
-            // { None, String, Comma, Semicolon, Whitespace, ScopeOpen, ScopeClose }
             switch (c) {
                 ',' => {
                     token.token = .Comma;
@@ -130,69 +130,91 @@ pub fn Format(
             }
         }
 
-        var fmtgen_ci: usize = 0; // utf-8 codepoints pushed
-        var fmtgen_i: usize = 0;
-        fmtgen: while (true) {
-            if (fmtgen_i >= line_tok.items.len) break :fmtgen;
-            var next_s: LineState = .Comment;
-            line_state = switch (line_state) {
-                .Label => ls: {
-                    if (std.mem.endsWith(u8, line_tok.items[fmtgen_i].data, ":")) {
-                        b_label = true;
-                        next_s = .Instruction;
-                    } else { // if not followed by ':', assume it's an instruction
-                        if (line_tok.items[fmtgen_i + 1].token != .Semicolon)
-                            next_s = .Operands;
-                        TokPadSpaces(&line, &fmtgen_ci, col_ins);
-                    }
-                    TokAppend(&line, line_tok.items, &fmtgen_i, &fmtgen_ci);
-                    break :ls TokEndLinePart(&b_state_initialized, next_s);
-                },
-                .Instruction => ls: {
-                    if (!b_state_initialized) {
-                        b_state_initialized = true;
-                        TokPadSpaces(&line, &fmtgen_ci, if (b_label) col_labins else col_ins);
-                    }
-                    TokSkipWhitespace(line_tok.items, &fmtgen_i);
-
-                    if (line_tok.items[fmtgen_i + 1].token != .Semicolon)
-                        next_s = .Operands;
-                    TokAppend(&line, line_tok.items, &fmtgen_i, &fmtgen_ci);
-                    break :ls TokEndLinePart(&b_state_initialized, next_s);
-                },
-                .Operands => ls: {
-                    if (!b_state_initialized) {
-                        b_state_initialized = true;
-                        TokPadSpaces(&line, &fmtgen_ci, if (b_label) col_labops else col_ops);
-                    }
-                    TokSkipWhitespace(line_tok.items, &fmtgen_i);
-                    TokAppend(&line, line_tok.items, &fmtgen_i, &fmtgen_ci);
-
-                    if (line_tok.items[fmtgen_i].token == .Comma) {
-                        TokAppendStr(&line, &fmtgen_ci, ", ");
-                        fmtgen_i += 1;
-                        break :ls line_state;
-                    }
-                    break :ls TokEndLinePart(&b_state_initialized, .Comment);
-                },
-                .Comment => ls: {
-                    if (!b_state_initialized) {
-                        b_state_initialized = true;
-                        TokPadSpaces(&line, &fmtgen_ci, col_com);
-                        TokAppendStr(&line, &fmtgen_ci, ";");
-                        fmtgen_i += 1;
-                    }
-                    TokAppend(&line, line_tok.items, &fmtgen_i, &fmtgen_ci);
-                    break :ls line_state;
-                },
-            };
-        }
+        FormatSourceLine(&line_tok, &line, &line_ctx);
 
         _ = out.write(line.items) catch unreachable; // FIXME: handle
         _ = out.write(if (b_crlf) "\r\n" else "\n") catch unreachable; // FIXME: handle
 
         line.clearRetainingCapacity();
         line_tok.clearRetainingCapacity();
+    }
+}
+
+const LineContext = struct {
+    ColCom: usize, // column: comment
+    ColIns: usize, // column: instruction
+    ColOps: usize, // column: operands
+    ColLabIns: usize, // column: instruction (with label present)
+    ColLabOps: usize, // column: operands (with label present)
+};
+
+/// takes a token list representing a "normal" nasm source line, and writes out
+/// the formatted results to a buffer. expects `out` to be empty.
+fn FormatSourceLine(
+    tok: *std.ArrayListUnmanaged(Token),
+    out: *std.ArrayListUnmanaged(u8),
+    ctx: *const LineContext,
+) void {
+    var b_label = false;
+    var b_state_initialized = false;
+    var line_state: LineState = .Label;
+
+    var fmtgen_ci: usize = 0; // utf-8 codepoints pushed
+    var fmtgen_i: usize = 0;
+    fmtgen: while (true) {
+        if (fmtgen_i >= tok.items.len) break :fmtgen;
+        var next_s: LineState = .Comment;
+        line_state = switch (line_state) {
+            .Label => ls: {
+                if (std.mem.endsWith(u8, tok.items[fmtgen_i].data, ":")) {
+                    b_label = true;
+                    next_s = .Instruction;
+                } else { // if not followed by ':', assume it's an instruction
+                    if (tok.items[fmtgen_i + 1].token != .Semicolon)
+                        next_s = .Operands;
+                    TokPadSpaces(out, &fmtgen_ci, ctx.ColIns);
+                }
+                TokAppend(out, tok.items, &fmtgen_i, &fmtgen_ci);
+                break :ls TokEndLinePart(&b_state_initialized, next_s);
+            },
+            .Instruction => ls: {
+                if (!b_state_initialized) {
+                    b_state_initialized = true;
+                    TokPadSpaces(out, &fmtgen_ci, if (b_label) ctx.ColLabIns else ctx.ColIns);
+                }
+                TokSkipWhitespace(tok.items, &fmtgen_i);
+
+                if (tok.items[fmtgen_i + 1].token != .Semicolon)
+                    next_s = .Operands;
+                TokAppend(out, tok.items, &fmtgen_i, &fmtgen_ci);
+                break :ls TokEndLinePart(&b_state_initialized, next_s);
+            },
+            .Operands => ls: {
+                if (!b_state_initialized) {
+                    b_state_initialized = true;
+                    TokPadSpaces(out, &fmtgen_ci, if (b_label) ctx.ColLabOps else ctx.ColOps);
+                }
+                TokSkipWhitespace(tok.items, &fmtgen_i);
+                TokAppend(out, tok.items, &fmtgen_i, &fmtgen_ci);
+
+                if (tok.items[fmtgen_i].token == .Comma) {
+                    TokAppendStr(out, &fmtgen_ci, ", ");
+                    fmtgen_i += 1;
+                    break :ls line_state;
+                }
+                break :ls TokEndLinePart(&b_state_initialized, .Comment);
+            },
+            .Comment => ls: {
+                if (!b_state_initialized) {
+                    b_state_initialized = true;
+                    TokPadSpaces(out, &fmtgen_ci, ctx.ColCom);
+                    TokAppendStr(out, &fmtgen_ci, ";");
+                    fmtgen_i += 1;
+                }
+                TokAppend(out, tok.items, &fmtgen_i, &fmtgen_ci);
+                break :ls line_state;
+            },
+        };
     }
 }
 
