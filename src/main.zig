@@ -55,7 +55,6 @@ pub fn Format(
 
     var tokens = std.ArrayListUnmanaged(u21).initBuffer(&OutBufToken);
     var line = std.ArrayListUnmanaged(u21).initBuffer(&OutBufLine);
-    var b_crlf = false;
 
     // FIXME: handle line read error
     var line_i: usize = 0;
@@ -63,12 +62,7 @@ pub fn Format(
         if (line_i == 0 and std.mem.startsWith(u8, line_s, &[3]u8{ 0xEF, 0xBB, 0xBF }))
             return error.SourceContainsBOM;
 
-        // TODO: just always output newline after pushing line?
-        if (line_i > 0) {
-            _ = out.write(if (b_crlf) "\r\n" else "\n") catch unreachable; // FIXME: handle
-        }
-
-        b_crlf = false;
+        var b_crlf = false;
         var b_label = false;
         var b_state_initialized = false;
         var line_state: LineState = .Label;
@@ -150,6 +144,7 @@ pub fn Format(
             const enc_len = std.unicode.utf8Encode(c, &enc_buf) catch unreachable; // FIXME: handle
             _ = out.write(enc_buf[0..enc_len]) catch unreachable; // FIXME: handle
         }
+        _ = out.write(if (b_crlf) "\r\n" else "\n") catch unreachable; // FIXME: handle
 
         tokens.clearRetainingCapacity();
         line.clearRetainingCapacity();
@@ -219,12 +214,14 @@ test "initial test to get things going plis rework/rename this later or else bro
         },
         .{ // line with all 4
             .in = " \t  my_label: mov eax,16; comment",
-            .ex = "my_label:   mov     eax, 16             ; comment",
+            .ex = "my_label:   mov     eax, 16             ; comment\n",
         },
         .{ // no label
             .in = " \t  mov eax,16; comment",
-            .ex = "    mov     eax, 16                     ; comment",
+            .ex = "    mov     eax, 16                     ; comment\n",
         },
+        // NOTE: curiously, this passes whether or not the input has a trailing
+        //  newline
         .{ // multiline with lone "label header"
             .in =
             \\    my_label:
@@ -233,11 +230,20 @@ test "initial test to get things going plis rework/rename this later or else bro
             .ex =
             \\my_label:
             \\    mov     eax, 16                     ; comment
+            \\
             ,
         },
         .{ // multiline with crlf break
             .in = "  my_label:\r\nmov eax,16; comment",
-            .ex = "my_label:\r\n    mov     eax, 16                     ; comment",
+            .ex = "my_label:\r\n    mov     eax, 16                     ; comment\n",
+        },
+        .{ // double multiline
+            .in = "  my_label:\n\nmov eax,16; comment",
+            .ex = "my_label:\n\n    mov     eax, 16                     ; comment\n",
+        },
+        .{ // double multiline crlf
+            .in = "  my_label:\r\n\r\nmov eax,16; comment",
+            .ex = "my_label:\r\n\r\n    mov     eax, 16                     ; comment\n",
         },
     };
 
