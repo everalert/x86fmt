@@ -12,10 +12,15 @@ pub fn main() !void {
     try Format(stdi_br.reader(), stdo_bw.writer(), .{});
 }
 
+const Token = struct {
+    token: enum(u8) { None, String, Comma, Semicolon, Whitespace, ScopeOpen, ScopeClose } = .None,
+    data: []const u8 = &[_]u8{},
+};
+
 // TODO: ring buffer, to support line lookback
-threadlocal var ScrBufLine = std.mem.zeroes([4096]u8);
-threadlocal var OutBufLine = std.mem.zeroes([4096]u21);
-threadlocal var OutBufToken = std.mem.zeroes([256]u21);
+var ScrBufLine = std.mem.zeroes([4096]u8);
+var TokBufLine = std.mem.zeroes([1024]Token);
+var OutBufLine = std.mem.zeroes([4096]u8);
 
 const FormatError = error{SourceContainsBOM};
 const LineState = enum { Label, Instruction, Operands, Comment };
@@ -53,8 +58,8 @@ pub fn Format(
     const col_labins: usize = gap_ins;
     const col_labops: usize = col_labins + gap_ops;
 
-    var tokens = std.ArrayListUnmanaged(u21).initBuffer(&OutBufToken);
-    var line = std.ArrayListUnmanaged(u21).initBuffer(&OutBufLine);
+    var line = std.ArrayListUnmanaged(u8).initBuffer(&OutBufLine);
+    var line_tok = std.ArrayListUnmanaged(Token).initBuffer(&TokBufLine);
 
     // FIXME: handle line read error
     var line_i: usize = 0;
@@ -77,121 +82,149 @@ pub fn Format(
             break :ws std.mem.trim(u8, line_ws, "\t ");
         };
 
-        var utf8it = std.unicode.Utf8Iterator{ .bytes = line_ws, .i = 0 };
-        while (utf8it.nextCodepoint()) |codepoint| {
-            var c = codepoint;
+        var tokgen_it = std.unicode.Utf8Iterator{ .bytes = line_ws, .i = 0 };
+        tokgen: while (true) {
+            const start_i = tokgen_it.i;
+            const c = tokgen_it.nextCodepoint() orelse break :tokgen;
+            var token: *Token = line_tok.addOneAssumeCapacity();
+            // { None, String, Comma, Semicolon, Whitespace, ScopeOpen, ScopeClose }
+            switch (c) {
+                ',' => {
+                    token.token = .Comma;
+                    token.data = line_ws[start_i..tokgen_it.i];
+                },
+                ';' => {
+                    token.token = .Semicolon;
+                    token.data = line_ws[start_i..tokgen_it.i];
+                },
+                '(', '[', '{' => {
+                    token.token = .ScopeOpen;
+                    token.data = line_ws[start_i..tokgen_it.i];
+                },
+                ')', ']', '}' => {
+                    token.token = .ScopeClose;
+                    token.data = line_ws[start_i..tokgen_it.i];
+                },
+                ' ', '\t' => {
+                    token.token = .Whitespace;
+                    while (true) {
+                        const peek_s = tokgen_it.peek(1);
+                        if (peek_s.len == 0 or
+                            (peek_s.len == 1 and std.mem.indexOfScalar(u8, " \t", peek_s[0]) == null))
+                            break;
+                        _ = tokgen_it.nextCodepoint();
+                    }
+                    token.data = line_ws[start_i..tokgen_it.i];
+                },
+                else => {
+                    token.token = .String;
+                    while (true) {
+                        const peek_s = tokgen_it.peek(1);
+                        if (peek_s.len == 0 or
+                            (peek_s.len == 1 and std.mem.indexOfScalar(u8, ",; \t([{}])", peek_s[0]) != null))
+                            break;
+                        _ = tokgen_it.nextCodepoint();
+                    }
+                    token.data = line_ws[start_i..tokgen_it.i];
+                },
+            }
+        }
+
+        var fmtgen_ci: usize = 0; // utf-8 codepoints pushed
+        var fmtgen_i: usize = 0;
+        fmtgen: while (true) {
+            if (fmtgen_i >= line_tok.items.len) break :fmtgen;
             var next_s: LineState = .Comment;
             line_state = switch (line_state) {
                 .Label => ls: {
-                    c = SkipWhitespace(&utf8it, c);
-                    c = ConsumeUntilCharacter(&utf8it, &tokens, c, &[_]u21{ '\t', ' ', ':', ';' });
-
-                    if (c == ':') {
+                    if (std.mem.endsWith(u8, line_tok.items[fmtgen_i].data, ":")) {
                         b_label = true;
                         next_s = .Instruction;
-                        tokens.appendAssumeCapacity(c);
                     } else { // if not followed by ':', assume it's an instruction
-                        if (c != ';') next_s = .Operands;
-                        PadSpaces(&line, col_ins);
+                        if (line_tok.items[fmtgen_i + 1].token != .Semicolon)
+                            next_s = .Operands;
+                        TokPadSpaces(&line, &fmtgen_ci, col_ins);
                     }
-                    line.appendSliceAssumeCapacity(tokens.items);
-                    break :ls EndLinePart(&tokens, &b_state_initialized, next_s);
+                    TokAppend(&line, line_tok.items, &fmtgen_i, &fmtgen_ci);
+                    break :ls TokEndLinePart(&b_state_initialized, next_s);
                 },
                 .Instruction => ls: {
                     if (!b_state_initialized) {
                         b_state_initialized = true;
-                        PadSpaces(&line, if (b_label) col_labins else col_ins);
+                        TokPadSpaces(&line, &fmtgen_ci, if (b_label) col_labins else col_ins);
                     }
-                    c = SkipWhitespace(&utf8it, c);
-                    c = ConsumeUntilCharacter(&utf8it, &tokens, c, &[_]u21{ '\t', ' ', ';' });
+                    TokSkipWhitespace(line_tok.items, &fmtgen_i);
 
-                    if (c != ';') next_s = .Operands;
-                    line.appendSliceAssumeCapacity(tokens.items);
-                    break :ls EndLinePart(&tokens, &b_state_initialized, next_s);
+                    if (line_tok.items[fmtgen_i + 1].token != .Semicolon)
+                        next_s = .Operands;
+                    TokAppend(&line, line_tok.items, &fmtgen_i, &fmtgen_ci);
+                    break :ls TokEndLinePart(&b_state_initialized, next_s);
                 },
                 .Operands => ls: {
                     if (!b_state_initialized) {
                         b_state_initialized = true;
-                        PadSpaces(&line, if (b_label) col_labops else col_ops);
+                        TokPadSpaces(&line, &fmtgen_ci, if (b_label) col_labops else col_ops);
                     }
-                    c = SkipWhitespace(&utf8it, c);
-                    c = ConsumeUntilCharacter(&utf8it, &tokens, c, &[_]u21{ '\t', ' ', ',', ';' });
+                    TokSkipWhitespace(line_tok.items, &fmtgen_i);
+                    TokAppend(&line, line_tok.items, &fmtgen_i, &fmtgen_ci);
 
-                    line.appendSliceAssumeCapacity(tokens.items);
-                    if (c == ',' or IsWhitespace(c)) {
-                        if (c == ',') line.appendAssumeCapacity(c);
-                        tokens.clearRetainingCapacity();
-                        line.appendAssumeCapacity(32);
+                    if (line_tok.items[fmtgen_i].token == .Comma) {
+                        TokAppendStr(&line, &fmtgen_ci, ", ");
+                        fmtgen_i += 1;
                         break :ls line_state;
                     }
-                    break :ls EndLinePart(&tokens, &b_state_initialized, .Comment);
+                    break :ls TokEndLinePart(&b_state_initialized, .Comment);
                 },
                 .Comment => ls: {
                     if (!b_state_initialized) {
                         b_state_initialized = true;
-                        PadSpaces(&line, col_com);
-                        line.appendAssumeCapacity(';');
+                        TokPadSpaces(&line, &fmtgen_ci, col_com);
+                        TokAppendStr(&line, &fmtgen_ci, ";");
+                        fmtgen_i += 1;
                     }
-                    tokens.appendAssumeCapacity(c);
+                    TokAppend(&line, line_tok.items, &fmtgen_i, &fmtgen_ci);
                     break :ls line_state;
                 },
             };
         }
-        line.appendSliceAssumeCapacity(tokens.items);
 
-        for (line.items) |c| {
-            var enc_buf: [4]u8 = undefined;
-            const enc_len = std.unicode.utf8Encode(c, &enc_buf) catch unreachable; // FIXME: handle
-            _ = out.write(enc_buf[0..enc_len]) catch unreachable; // FIXME: handle
-        }
+        _ = out.write(line.items) catch unreachable; // FIXME: handle
         _ = out.write(if (b_crlf) "\r\n" else "\n") catch unreachable; // FIXME: handle
 
-        tokens.clearRetainingCapacity();
         line.clearRetainingCapacity();
+        line_tok.clearRetainingCapacity();
     }
 }
 
 // HELPERS
 
-fn ConsumeUntilCharacter(
-    utf8it: *std.unicode.Utf8Iterator,
-    tokens: *std.ArrayListUnmanaged(u21),
-    this_c: u21,
-    chars: []const u21,
-) u21 {
-    var c = this_c;
-    while (std.mem.indexOf(u21, chars, @as(*[1]u21, &c)) == null) {
-        tokens.appendAssumeCapacity(c);
-        c = utf8it.nextCodepoint() orelse break;
-    }
-    return c;
+fn TokSkipWhitespace(tok: []const Token, ti: *usize) void {
+    var i = ti.*;
+    while (i < tok.len and tok[i].token == .Whitespace)
+        i += 1;
+    ti.* = i;
 }
 
-fn IsWhitespace(c: u21) bool {
-    return c == 32 or c == 9;
+fn TokPadSpaces(line: *std.ArrayListUnmanaged(u8), col: *usize, until: usize) void {
+    const n: usize = @max(1, until -| col.*);
+    line.appendNTimesAssumeCapacity(32, n);
+    col.* += n;
 }
 
-fn SkipWhitespace(utf8it: *std.unicode.Utf8Iterator, c: u21) u21 {
-    if (!IsWhitespace(c)) return c;
-    while (utf8it.nextCodepoint()) |next_c| {
-        if (IsWhitespace(next_c)) continue;
-        return next_c;
-    }
-    return 0; // FIXME: better return value?
-}
-
-fn PadSpaces(line: *std.ArrayListUnmanaged(u21), until: usize) void {
-    line.appendNTimesAssumeCapacity(32, @max(1, until -| line.items.len));
-}
-
-fn EndLinePart(
-    tokens: *std.ArrayListUnmanaged(u21),
-    next_initialized: *bool,
-    next_state: LineState,
-) LineState {
+fn TokEndLinePart(next_initialized: *bool, next_state: LineState) LineState {
     next_initialized.* = false;
-    tokens.clearRetainingCapacity();
     return next_state;
+}
+
+fn TokAppend(line: *std.ArrayListUnmanaged(u8), tok: []const Token, i: *usize, ci: *usize) void {
+    line.appendSliceAssumeCapacity(tok[i.*].data);
+    ci.* += std.unicode.utf8CountCodepoints(tok[i.*].data) catch unreachable;
+    i.* += 1;
+}
+
+fn TokAppendStr(line: *std.ArrayListUnmanaged(u8), ci: *usize, str: []const u8) void {
+    line.appendSliceAssumeCapacity(str);
+    ci.* += str.len;
 }
 
 // TESTING
@@ -217,7 +250,7 @@ test "initial test to get things going plis rework/rename this later or else bro
             .ex = "my_label:   mov     eax, 16             ; comment\n",
         },
         .{ // no label
-            .in = " \t  mov eax,16; comment",
+            .in = " \t  mov  eax,16; comment",
             .ex = "    mov     eax, 16                     ; comment\n",
         },
         // NOTE: curiously, this passes whether or not the input has a trailing
