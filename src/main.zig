@@ -55,23 +55,16 @@ pub fn Format(
     out: anytype,
     settings: FormatSettings,
 ) FormatError!void {
-    assert(settings.TabSize > 0);
-    assert(std.math.isPowerOfTwo(settings.TabSize));
-
-    const line_ctx: LineContext = ctx: {
-        const gap_ins: usize = (settings.InsMinGap + settings.TabSize - 1) & ~(settings.TabSize - 1);
-        const gap_ops: usize = (settings.OpsMinGap + settings.TabSize - 1) & ~(settings.TabSize - 1);
-        var ctx: LineContext = undefined;
-        ctx.ColCom = (settings.ComCol + settings.TabSize - 1) & ~(settings.TabSize - 1);
-        ctx.ColIns = settings.TabSize;
-        ctx.ColOps = ctx.ColIns + gap_ops;
-        ctx.ColLabIns = gap_ins;
-        ctx.ColLabOps = ctx.ColLabIns + gap_ops;
-        break :ctx ctx;
-    };
-
     var line = std.ArrayListUnmanaged(u8).initBuffer(&OutBufLine);
     var line_tok = std.ArrayListUnmanaged(Token).initBuffer(&TokBufLine);
+
+    const line_ctx: LineContext = .{
+        .ColCom = settings.ComCol,
+        .ColIns = settings.TabSize,
+        .ColOps = settings.TabSize + settings.OpsMinGap,
+        .ColLabIns = settings.InsMinGap,
+        .ColLabOps = settings.InsMinGap + settings.OpsMinGap,
+    };
 
     // FIXME: handle line read error
     var line_i: usize = 0;
