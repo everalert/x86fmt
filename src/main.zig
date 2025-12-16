@@ -96,8 +96,8 @@ pub fn Format(
                             will_escape = true;
                     },
                     '\"', '\'' => {
-                        if (scope != null and c == scope.?) {
-                            if (!escaped) scope = null;
+                        if (scope) |s| {
+                            if (s == c and !escaped) scope = null;
                             continue;
                         }
                         scope = c;
@@ -287,17 +287,15 @@ fn FormatSourceLine(
     var fmtgen_i: usize = 0;
     fmtgen: while (true) {
         if (fmtgen_i >= tok.items.len) break :fmtgen;
-        var next_s: LineState = .Comment;
         line_state = switch (line_state) {
             .Label => ls: {
-                if (std.mem.endsWith(u8, tok.items[fmtgen_i].data, ":")) {
+                const next_s: LineState = if (std.mem.endsWith(u8, tok.items[fmtgen_i].data, ":")) st: {
                     b_label = true;
-                    next_s = .Instruction;
-                } else { // if not followed by ':', assume it's an instruction
-                    if (tok.items[fmtgen_i + 1].token != .Semicolon)
-                        next_s = .Operands;
+                    break :st .Instruction;
+                } else st: { // if not followed by ':', assume it's an instruction
                     TokPadSpaces(out, &fmtgen_ci, ctx.ColIns);
-                }
+                    break :st .Operands;
+                };
                 TokAppend(out, tok.items, &fmtgen_i, &fmtgen_ci);
                 break :ls TokEndLinePart(&b_state_initialized, next_s);
             },
@@ -307,11 +305,8 @@ fn FormatSourceLine(
                     TokPadSpaces(out, &fmtgen_ci, if (b_label) ctx.ColLabIns else ctx.ColIns);
                 }
                 TokSkipWhitespace(tok.items, &fmtgen_i);
-
-                if (tok.items[fmtgen_i + 1].token != .Semicolon)
-                    next_s = .Operands;
                 TokAppend(out, tok.items, &fmtgen_i, &fmtgen_ci);
-                break :ls TokEndLinePart(&b_state_initialized, next_s);
+                break :ls TokEndLinePart(&b_state_initialized, .Operands);
             },
             .Operands => ls: {
                 if (!b_state_initialized) {
@@ -319,14 +314,13 @@ fn FormatSourceLine(
                     TokPadSpaces(out, &fmtgen_ci, if (b_label) ctx.ColLabOps else ctx.ColOps);
                 }
                 TokSkipWhitespace(tok.items, &fmtgen_i);
-                TokAppend(out, tok.items, &fmtgen_i, &fmtgen_ci);
-
-                if (tok.items.len > fmtgen_i and
-                    tok.items[fmtgen_i].token == .Comma)
-                {
-                    TokAppendStr(out, &fmtgen_ci, ", ");
-                    fmtgen_i += 1;
-                    break :ls line_state;
+                while (tok.items.len > fmtgen_i) {
+                    if (tok.items[fmtgen_i].token == .Comma) {
+                        TokAppendStr(out, &fmtgen_ci, ", ");
+                        fmtgen_i += 1;
+                    } else {
+                        TokAppend(out, tok.items, &fmtgen_i, &fmtgen_ci);
+                    }
                 }
                 break :ls TokEndLinePart(&b_state_initialized, .Comment);
             },
@@ -438,6 +432,10 @@ test "initial test to get things going plis rework/rename this later or else bro
         .{ // misc preprocessor directive
             .in = "%pragma    something",
             .ex = "%pragma something\n",
+        },
+        .{ // comment detection
+            .in = "string  db \"Atta'c'h;Console Failed!\",0; comment",
+            .ex = "    string  db \"Atta'c'h;Console Failed!\", 0 ; comment\n",
         },
     };
 
