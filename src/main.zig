@@ -79,19 +79,49 @@ pub fn Format(
         if (line_i == 0 and std.mem.startsWith(u8, line_s, &[3]u8{ 0xEF, 0xBB, 0xBF }))
             return error.SourceContainsBOM;
 
-        var b_crlf = false;
+        // TODO: check line is valid utf-8 before all else, and just emit the
+        //  line without any processing if not
 
-        // work slice
-        const line_ws: []const u8 = ws: {
-            var line_ws = line_s;
-            if (std.mem.endsWith(u8, line_ws, "\r")) {
-                line_ws = line_ws[0 .. line_ws.len - 1];
+        const b_crlf: bool, const body: []const u8, const comment: []const u8 = comgen: {
+            var b_crlf = false;
+            var body_s = line_s[0..];
+            var com_s = line_s[line_s.len..];
+
+            if (std.mem.endsWith(u8, body_s, "\r")) {
+                body_s = body_s[0 .. body_s.len - 1];
                 b_crlf = true;
             }
-            break :ws std.mem.trim(u8, line_ws, "\t ");
+
+            var scope: ?u8 = null;
+            var escaped = false;
+            for (body_s, 0..) |c, i| {
+                var will_escape = false;
+                defer escaped = will_escape;
+                switch (c) {
+                    '\\' => {
+                        if (scope != null and !escaped)
+                            will_escape = true;
+                    },
+                    '\"', '\'' => {
+                        if (scope != null and c == scope.?) {
+                            if (!escaped) scope = null;
+                            continue;
+                        }
+                        scope = c;
+                    },
+                    ';' => if (scope == null) {
+                        com_s = body_s[i..];
+                        body_s = body_s[0..i];
+                        break;
+                    },
+                    else => {},
+                }
+            }
+
+            break :comgen .{ b_crlf, std.mem.trim(u8, body_s, "\t "), com_s };
         };
 
-        var tokgen_it = std.unicode.Utf8Iterator{ .bytes = line_ws, .i = 0 };
+        var tokgen_it = std.unicode.Utf8Iterator{ .bytes = body, .i = 0 };
         tokgen: while (true) {
             const start_i = tokgen_it.i;
             const c = tokgen_it.nextCodepoint() orelse break :tokgen;
@@ -99,19 +129,19 @@ pub fn Format(
             switch (c) {
                 ',' => {
                     token.token = .Comma;
-                    token.data = line_ws[start_i..tokgen_it.i];
+                    token.data = body[start_i..tokgen_it.i];
                 },
                 ';' => {
                     token.token = .Semicolon;
-                    token.data = line_ws[start_i..tokgen_it.i];
+                    token.data = body[start_i..tokgen_it.i];
                 },
                 '(', '[', '{' => {
                     token.token = .ScopeOpen;
-                    token.data = line_ws[start_i..tokgen_it.i];
+                    token.data = body[start_i..tokgen_it.i];
                 },
                 ')', ']', '}' => {
                     token.token = .ScopeClose;
-                    token.data = line_ws[start_i..tokgen_it.i];
+                    token.data = body[start_i..tokgen_it.i];
                 },
                 ' ', '\t' => {
                     token.token = .Whitespace;
@@ -122,7 +152,7 @@ pub fn Format(
                             break;
                         _ = tokgen_it.nextCodepoint();
                     }
-                    token.data = line_ws[start_i..tokgen_it.i];
+                    token.data = body[start_i..tokgen_it.i];
                 },
                 else => {
                     token.token = .String;
@@ -133,7 +163,7 @@ pub fn Format(
                             break;
                         _ = tokgen_it.nextCodepoint();
                     }
-                    token.data = line_ws[start_i..tokgen_it.i];
+                    token.data = body[start_i..tokgen_it.i];
                 },
             }
         }
@@ -173,6 +203,7 @@ pub fn Format(
             };
         };
 
+        // FIXME: give this real logic lol
         switch (line_mode) {
             .AsmDirective => {
                 // TODO: actually format this properly; need to format differently
@@ -219,6 +250,14 @@ pub fn Format(
             else => {},
         }
 
+        // NOTE: assumes the comment slice will contain the leading semicolon
+        // FIXME: base on number of utf8 codepoints, not byte length of `line`
+        if (comment.len > 0) {
+            const pad_n: usize = @max(1, line_ctx.ColCom -| line.items.len);
+            line.appendNTimesAssumeCapacity(32, pad_n);
+            line.appendSliceAssumeCapacity(comment);
+        }
+
         _ = out.write(line.items) catch unreachable; // FIXME: handle
         _ = out.write(if (b_crlf) "\r\n" else "\n") catch unreachable; // FIXME: handle
 
@@ -235,6 +274,8 @@ const LineContext = struct {
     ColLabOps: usize, // column: operands (with label present)
 };
 
+// FIXME: pathological lack of bounds checking and assuming that there will be a
+//  next token or chunk
 // TODO: take tokens as a slice?
 /// takes a token list representing a "normal" nasm source line, and writes out
 /// the formatted results to a buffer
@@ -287,23 +328,18 @@ fn FormatSourceLine(
                 TokSkipWhitespace(tok.items, &fmtgen_i);
                 TokAppend(out, tok.items, &fmtgen_i, &fmtgen_ci);
 
-                if (tok.items[fmtgen_i].token == .Comma) {
+                if (tok.items.len > fmtgen_i and
+                    tok.items[fmtgen_i].token == .Comma)
+                {
                     TokAppendStr(out, &fmtgen_ci, ", ");
                     fmtgen_i += 1;
                     break :ls line_state;
                 }
                 break :ls TokEndLinePart(&b_state_initialized, .Comment);
             },
-            .Comment => ls: {
-                if (!b_state_initialized) {
-                    b_state_initialized = true;
-                    TokPadSpaces(out, &fmtgen_ci, ctx.ColCom);
-                    TokAppendStr(out, &fmtgen_ci, ";");
-                    fmtgen_i += 1;
-                }
-                TokAppend(out, tok.items, &fmtgen_i, &fmtgen_ci);
-                break :ls line_state;
-            },
+            // input stream should be done by this point, comment printing will
+            // be handled externally
+            .Comment => unreachable,
         };
     }
 }
