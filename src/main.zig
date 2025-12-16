@@ -91,11 +91,20 @@ pub fn Format(
     // FIXME: handle line read error
     var line_i: usize = 0;
     while (in.readUntilDelimiterOrEof(&ScrBufLine, '\n') catch unreachable) |line_s| : (line_i += 1) {
+        defer {
+            line.clearRetainingCapacity();
+            line_tok.clearRetainingCapacity();
+            line_lex.clearRetainingCapacity();
+        }
+
         if (line_i == 0 and std.mem.startsWith(u8, line_s, &[3]u8{ 0xEF, 0xBB, 0xBF }))
             return error.SourceContainsBOM;
 
-        // TODO: check line is valid utf-8 before all else, and just emit the
-        //  line without any processing if not
+        if (!std.unicode.utf8ValidateSlice(line_s)) {
+            _ = out.write(line_s) catch unreachable; // FIXME: handle
+            _ = out.write("\n") catch unreachable; // FIXME: handle
+            continue;
+        }
 
         const b_crlf: bool, const body: []const u8, const comment: []const u8 = comgen: {
             var b_crlf = false;
@@ -301,10 +310,6 @@ pub fn Format(
 
         _ = out.write(line.items) catch unreachable; // FIXME: handle
         _ = out.write(if (b_crlf) "\r\n" else "\n") catch unreachable; // FIXME: handle
-
-        line.clearRetainingCapacity();
-        line_tok.clearRetainingCapacity();
-        line_lex.clearRetainingCapacity();
     }
 }
 
@@ -521,6 +526,16 @@ test "initial test to get things going plis rework/rename this later or else bro
         .{ // comment detection
             .in = "string  db \"Atta'c'h;Console Failed!\",0; comment",
             .ex = "    string  db \"Atta'c'h;Console Failed!\", 0 ; comment\n",
+        },
+        .{ // invalid utf8 (codepoint malformed)
+            // https://stackoverflow.com/a/3886015
+            .in = "%pragma invalid_utf8_\xf0\x28\x8c\xbc",
+            .ex = "%pragma invalid_utf8_\xf0\x28\x8c\xbc\n",
+        },
+        .{ // invalid utf8 (codepoint out of range)
+            // https://stackoverflow.com/a/3886015
+            .in = "%pragma invalid_utf8_\xf8\xa1\xa1\xa1\xa1",
+            .ex = "%pragma invalid_utf8_\xf8\xa1\xa1\xa1\xa1\n",
         },
     };
 
