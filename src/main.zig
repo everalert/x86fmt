@@ -12,16 +12,24 @@ pub fn main() !void {
     try Format(stdi_br.reader(), stdo_bw.writer(), .{});
 }
 
-const TokenKind = enum(u8) { None, String, Comma, Backslash, Whitespace, Scope };
+const TokenKind = enum(u8) { None, String, MathOp, Comma, Backslash, Whitespace, Scope };
+
 const Token = struct {
     kind: TokenKind = .None,
     data: []const u8 = &[_]u8{},
 };
 
 const LexemeKind = enum(u8) { None, Word, Separator };
+
 const Lexeme = struct {
     kind: LexemeKind = .None,
     data: []const Token,
+};
+
+const LexemeOpts = packed struct(u32) {
+    bToLower: bool = false,
+    bHeadToLower: bool = false,
+    _: u30 = 0,
 };
 
 const LineMode = enum { Blank, Unknown, Comment, Source, Macro, AsmDirective, PreProcDirective };
@@ -32,11 +40,16 @@ const LineMode = enum { Blank, Unknown, Comment, Source, Macro, AsmDirective, Pr
 /// identifiers that can appear as first word on a directive line, including aliases
 const AssemblerDirective = enum { bits, use16, use32, default, section, segment, absolute, @"extern", required, global, common, static, prefix, gprefix, lprefix, suffix, gsuffix, lsuffix, cpu, dollarhex, float, warning, list };
 
+// TODO: comptime config
+const BUF_SIZE_LINE_IO = 4096;
+const BUF_SIZE_LINE_TOK = 1024;
+const BUF_SIZE_LINE_LEX = 1024;
+const BUF_SIZE_TOK = 256;
 // TODO: ring buffer, to support line lookback
-var ScrBufLine = std.mem.zeroes([4096]u8);
-var TokBufLine = std.mem.zeroes([1024]Token);
-var LexBufLine = std.mem.zeroes([1024]Lexeme);
-var OutBufLine = std.mem.zeroes([4096]u8);
+var OutBufLine = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
+var ScrBufLine = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
+var TokBufLine = std.mem.zeroes([BUF_SIZE_LINE_TOK]Token);
+var LexBufLine = std.mem.zeroes([BUF_SIZE_LINE_LEX]Lexeme);
 
 const FormatError = error{SourceContainsBOM};
 const LineState = enum { Label, Instruction, Operands, Comment };
@@ -137,6 +150,10 @@ pub fn Format(
                     token.kind = .Backslash;
                     token.data = body[start_i..tokgen_it.i];
                 },
+                '+', '-', '*', '/' => {
+                    token.kind = .MathOp;
+                    token.data = body[start_i..tokgen_it.i];
+                },
                 '(', '[', '{', ')', ']', '}', '\"', '\'', '`' => {
                     token.kind = .Scope;
                     token.data = body[start_i..tokgen_it.i];
@@ -203,13 +220,13 @@ pub fn Format(
                         const oi = std.mem.indexOfScalar(u8, scope_opener, t.data[0]);
                         if (oi != null) scope = t.data[0];
                     },
-                    .Comma, .Backslash, .String => |k| {
+                    .Comma, .Backslash, .String, .MathOp => |k| {
                         if (scope != null) continue;
                         switch (k) {
                             .Comma, .Backslash => {
                                 emit_lexeme = .Separator;
                             },
-                            .String => {
+                            .String, .MathOp => {
                                 emit_lexeme = .Word;
                             },
                             else => unreachable,
@@ -255,35 +272,19 @@ pub fn Format(
 
         // FIXME: give this real logic lol
         switch (line_mode) {
-            .AsmDirective => {
+            // TODO: special case formatting for 'primitive'-type assembly directives
+            .AsmDirective, .PreProcDirective, .Macro => {
                 var fmtgen_i: usize = 0;
                 var fmtgen_ci: usize = 0;
-                // TODO: actually format this properly; need to format differently
-                //  for 'primitive'-type directives
-                //var case_buf: [12]u8 = undefined;
-                //const case = std.ascii.lowerString(&case_buf, line_tok.items[0].data);
-                //line.appendSliceAssumeCapacity(case);
-                LexAppend(&line, &line_lex.items[0], &fmtgen_i, &fmtgen_ci);
+
+                LexAppendOpts(&line, &line_lex.items[0], &fmtgen_i, &fmtgen_ci, .{ .bHeadToLower = true });
 
                 var prev_kind: LexemeKind = .Word;
                 for (line_lex.items[1..]) |*l| {
-                    if (l.kind != .Separator and prev_kind != .Separator)
+                    if (BLAND(l.kind != .Separator, prev_kind != .Separator))
                         PadSpaces(&line, &fmtgen_ci, fmtgen_ci);
                     LexAppend(&line, l, &fmtgen_i, &fmtgen_ci);
                     prev_kind = l.kind;
-                }
-            },
-            .PreProcDirective, .Macro => {
-                var case_buf: [12]u8 = undefined;
-                const case = std.ascii.lowerString(&case_buf, line_tok.items[0].data);
-                line.appendSliceAssumeCapacity(case);
-
-                for (line_tok.items[1..]) |tok| {
-                    switch (tok.kind) {
-                        .Whitespace => line.appendAssumeCapacity(' '),
-                        .Comma => line.appendSliceAssumeCapacity(", "),
-                        else => line.appendSliceAssumeCapacity(tok.data),
-                    }
                 }
             },
             .Source => FormatSourceLine(&line_lex, &line, &line_ctx),
@@ -332,8 +333,7 @@ fn FormatSourceLine(
 
     var fmtgen_ci: usize = 0; // utf-8 codepoints pushed
     var fmtgen_i: usize = 0;
-    fmtgen: while (true) {
-        if (fmtgen_i >= lex.items.len) break :fmtgen;
+    while (fmtgen_i < lex.items.len) {
         line_state = switch (line_state) {
             .Label => ls: {
                 assert(fmtgen_i == 0);
@@ -360,7 +360,7 @@ fn FormatSourceLine(
                 PadSpaces(out, &fmtgen_ci, if (b_label) ctx.ColLabOps else ctx.ColOps);
                 var prev_kind: LexemeKind = .Separator;
                 for (lex.items[fmtgen_i..]) |*l| {
-                    if (l.kind != .Separator and prev_kind != .Separator)
+                    if (BLAND(l.kind != .Separator, prev_kind != .Separator))
                         PadSpaces(out, &fmtgen_ci, fmtgen_ci);
                     LexAppend(out, l, &fmtgen_i, &fmtgen_ci);
                     prev_kind = l.kind;
@@ -385,7 +385,12 @@ fn PadSpaces(line: *std.ArrayListUnmanaged(u8), col: *usize, until: usize) void 
 
 /// appends the contents of a lexeme to a byte array, returning the number of
 /// utf-8 codepoints written
-fn LexAppend(line: *std.ArrayListUnmanaged(u8), lex: *Lexeme, i: *usize, ci: *usize) void {
+inline fn LexAppend(line: *std.ArrayListUnmanaged(u8), lex: *Lexeme, i: *usize, ci: *usize) void {
+    LexAppendOpts(line, lex, i, ci, .{});
+}
+/// appends the contents of a lexeme to a byte array, returning the number of
+/// utf-8 codepoints written
+fn LexAppendOpts(line: *std.ArrayListUnmanaged(u8), lex: *Lexeme, i: *usize, ci: *usize, opts: LexemeOpts) void {
     switch (lex.kind) {
         .None => unreachable,
         .Separator => {
@@ -394,12 +399,44 @@ fn LexAppend(line: *std.ArrayListUnmanaged(u8), lex: *Lexeme, i: *usize, ci: *us
             line.appendAssumeCapacity(' ');
             ci.* += 1 + (std.unicode.utf8CountCodepoints(lex.data[0].data) catch unreachable);
         },
-        .Word => for (lex.data) |t| {
-            line.appendSliceAssumeCapacity(t.data);
-            ci.* += std.unicode.utf8CountCodepoints(t.data) catch unreachable;
+        // FIXME: maybe just:
+        //  if token_prev_kind==.String and token_kind==.string, add space first
+        //  * may want similar logic for "sentence" emission too, as well as the
+        //    separator logic from there to here
+        .Word => {
+            var t_kind_prev: TokenKind = .None;
+            var b_lower_emitted = false;
+            for (lex.data) |t| {
+                defer t_kind_prev = t.kind;
+                if (BLAND(t.kind == .String, t.kind == t_kind_prev))
+                    line.appendAssumeCapacity(' ');
+                if (BLAND(t.kind == .String, BLOR(opts.bToLower, BLAND(opts.bHeadToLower, !b_lower_emitted)))) {
+                    var buf: [BUF_SIZE_TOK]u8 = undefined;
+                    const lower = std.ascii.lowerString(&buf, t.data);
+                    line.appendSliceAssumeCapacity(lower);
+                    b_lower_emitted = true;
+                } else {
+                    line.appendSliceAssumeCapacity(t.data);
+                }
+                ci.* += std.unicode.utf8CountCodepoints(t.data) catch unreachable;
+            }
         },
     }
     i.* += 1;
+}
+
+// UTIL
+
+// TODO: confirm these actually make a difference vs natural codegen
+
+/// branchless and
+inline fn BLAND(b1: bool, b2: bool) bool {
+    return @intFromBool(b1) & @intFromBool(b2) > 0;
+}
+
+/// branchless or
+inline fn BLOR(b1: bool, b2: bool) bool {
+    return @intFromBool(b1) | @intFromBool(b2) > 0;
 }
 
 // TESTING
