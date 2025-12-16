@@ -12,9 +12,16 @@ pub fn main() !void {
     try Format(stdi_br.reader(), stdo_bw.writer(), .{});
 }
 
+const TokenKind = enum(u8) { None, String, Comma, Backslash, Whitespace, Scope };
 const Token = struct {
-    token: enum(u8) { None, String, Comma, Semicolon, Whitespace, ScopeOpen, ScopeClose } = .None,
+    kind: TokenKind = .None,
     data: []const u8 = &[_]u8{},
+};
+
+const LexemeKind = enum(u8) { None, Word, Separator };
+const Lexeme = struct {
+    kind: LexemeKind = .None,
+    data: []const Token,
 };
 
 const LineMode = enum { Blank, Unknown, Comment, Source, Macro, AsmDirective, PreProcDirective };
@@ -28,6 +35,7 @@ const AssemblerDirective = enum { bits, use16, use32, default, section, segment,
 // TODO: ring buffer, to support line lookback
 var ScrBufLine = std.mem.zeroes([4096]u8);
 var TokBufLine = std.mem.zeroes([1024]Token);
+var LexBufLine = std.mem.zeroes([1024]Lexeme);
 var OutBufLine = std.mem.zeroes([4096]u8);
 
 const FormatError = error{SourceContainsBOM};
@@ -57,6 +65,7 @@ pub fn Format(
 ) FormatError!void {
     var line = std.ArrayListUnmanaged(u8).initBuffer(&OutBufLine);
     var line_tok = std.ArrayListUnmanaged(Token).initBuffer(&TokBufLine);
+    var line_lex = std.ArrayListUnmanaged(Lexeme).initBuffer(&LexBufLine);
 
     const line_ctx: LineContext = .{
         .ColCom = settings.ComCol,
@@ -95,7 +104,7 @@ pub fn Format(
                         if (scope != null and !escaped)
                             will_escape = true;
                     },
-                    '\"', '\'' => {
+                    '\"', '\'', '`' => {
                         if (scope) |s| {
                             if (s == c and !escaped) scope = null;
                             continue;
@@ -121,23 +130,19 @@ pub fn Format(
             var token: *Token = line_tok.addOneAssumeCapacity();
             switch (c) {
                 ',' => {
-                    token.token = .Comma;
+                    token.kind = .Comma;
                     token.data = body[start_i..tokgen_it.i];
                 },
-                ';' => {
-                    token.token = .Semicolon;
+                '\\' => {
+                    token.kind = .Backslash;
                     token.data = body[start_i..tokgen_it.i];
                 },
-                '(', '[', '{' => {
-                    token.token = .ScopeOpen;
-                    token.data = body[start_i..tokgen_it.i];
-                },
-                ')', ']', '}' => {
-                    token.token = .ScopeClose;
+                '(', '[', '{', ')', ']', '}', '\"', '\'', '`' => {
+                    token.kind = .Scope;
                     token.data = body[start_i..tokgen_it.i];
                 },
                 ' ', '\t' => {
-                    token.token = .Whitespace;
+                    // skip whitespace, will be reinserted based on context
                     while (true) {
                         const peek_s = tokgen_it.peek(1);
                         if (peek_s.len == 0 or
@@ -145,19 +150,72 @@ pub fn Format(
                             break;
                         _ = tokgen_it.nextCodepoint();
                     }
-                    token.data = body[start_i..tokgen_it.i];
+                    _ = line_tok.pop();
                 },
                 else => {
-                    token.token = .String;
+                    token.kind = .String;
                     while (true) {
                         const peek_s = tokgen_it.peek(1);
                         if (peek_s.len == 0 or
-                            (peek_s.len == 1 and std.mem.indexOfScalar(u8, ",; \t([{}])", peek_s[0]) != null))
+                            (peek_s.len == 1 and std.mem.indexOfScalar(u8, ", \t([{}])\"'`\\", peek_s[0]) != null))
                             break;
                         _ = tokgen_it.nextCodepoint();
                     }
                     token.data = body[start_i..tokgen_it.i];
                 },
+            }
+        }
+
+        // keep the stream flat since this is just for visual grouping, but this
+        //  is getting dangerously close to just generating an AST lol
+        // tokens -> lexeme
+        {
+            const scope_opener = "([{\"'`";
+            const scope_closer = ")]}\"'`";
+            const scope_escapable = [_]bool{ false, false, false, true, true, true };
+            var scope: ?u8 = null;
+            var prev_token_kind: TokenKind = .None;
+            var start_i: usize = 0;
+            for (line_tok.items, 0..) |t, i| {
+                var emit_lexeme: ?LexemeKind = null;
+                defer prev_token_kind = t.kind;
+                defer if (emit_lexeme) |k| {
+                    var lexeme: *Lexeme = line_lex.addOneAssumeCapacity();
+                    lexeme.kind = k;
+                    lexeme.data = line_tok.items[start_i .. i + 1];
+                    start_i = i + 1;
+                };
+
+                switch (t.kind) {
+                    .None, .Whitespace => unreachable,
+                    .Scope => {
+                        if (scope != null) {
+                            const ci = std.mem.indexOfScalar(u8, scope_closer, t.data[0]);
+                            if (ci != null and
+                                scope_opener[ci.?] == scope.? and
+                                !(scope_escapable[ci.?] and prev_token_kind == .Backslash))
+                            {
+                                scope = null;
+                                emit_lexeme = .Word;
+                            }
+                            continue;
+                        }
+                        const oi = std.mem.indexOfScalar(u8, scope_opener, t.data[0]);
+                        if (oi != null) scope = t.data[0];
+                    },
+                    .Comma, .Backslash, .String => |k| {
+                        if (scope != null) continue;
+                        switch (k) {
+                            .Comma, .Backslash => {
+                                emit_lexeme = .Separator;
+                            },
+                            .String => {
+                                emit_lexeme = .Word;
+                            },
+                            else => unreachable,
+                        }
+                    },
+                }
             }
         }
 
@@ -168,7 +226,7 @@ pub fn Format(
             const first = &line_tok.items[0];
             var case_buf: [64]u8 = undefined;
 
-            break :mode switch (first.token) {
+            break :mode switch (first.kind) {
                 .String => str: {
                     const lowercase = std.ascii.lowerString(&case_buf, first.data);
 
@@ -189,8 +247,7 @@ pub fn Format(
 
                     break :str .Source;
                 },
-                .ScopeOpen => if (first.data[0] == '[') .AsmDirective else .Unknown,
-                .Semicolon => .Comment,
+                .Scope => if (first.data[0] == '[') .AsmDirective else .Unknown,
                 .Whitespace => unreachable, // token sequence should be pre-stripped
                 else => .Unknown,
             };
@@ -199,47 +256,37 @@ pub fn Format(
         // FIXME: give this real logic lol
         switch (line_mode) {
             .AsmDirective => {
+                var fmtgen_i: usize = 0;
+                var fmtgen_ci: usize = 0;
                 // TODO: actually format this properly; need to format differently
                 //  for 'primitive'-type directives
+                //var case_buf: [12]u8 = undefined;
+                //const case = std.ascii.lowerString(&case_buf, line_tok.items[0].data);
+                //line.appendSliceAssumeCapacity(case);
+                LexAppend(&line, &line_lex.items[0], &fmtgen_i, &fmtgen_ci);
+
+                var prev_kind: LexemeKind = .Word;
+                for (line_lex.items[1..]) |*l| {
+                    if (l.kind != .Separator and prev_kind != .Separator)
+                        PadSpaces(&line, &fmtgen_ci, fmtgen_ci);
+                    LexAppend(&line, l, &fmtgen_i, &fmtgen_ci);
+                    prev_kind = l.kind;
+                }
+            },
+            .PreProcDirective, .Macro => {
                 var case_buf: [12]u8 = undefined;
                 const case = std.ascii.lowerString(&case_buf, line_tok.items[0].data);
                 line.appendSliceAssumeCapacity(case);
 
                 for (line_tok.items[1..]) |tok| {
-                    switch (tok.token) {
+                    switch (tok.kind) {
                         .Whitespace => line.appendAssumeCapacity(' '),
                         .Comma => line.appendSliceAssumeCapacity(", "),
                         else => line.appendSliceAssumeCapacity(tok.data),
                     }
                 }
             },
-            .PreProcDirective => {
-                var case_buf: [12]u8 = undefined;
-                const case = std.ascii.lowerString(&case_buf, line_tok.items[0].data);
-                line.appendSliceAssumeCapacity(case);
-
-                for (line_tok.items[1..]) |tok| {
-                    switch (tok.token) {
-                        .Whitespace => line.appendAssumeCapacity(' '),
-                        .Comma => line.appendSliceAssumeCapacity(", "),
-                        else => line.appendSliceAssumeCapacity(tok.data),
-                    }
-                }
-            },
-            .Macro => {
-                var case_buf: [12]u8 = undefined;
-                const case = std.ascii.lowerString(&case_buf, line_tok.items[0].data);
-                line.appendSliceAssumeCapacity(case);
-
-                for (line_tok.items[1..]) |tok| {
-                    switch (tok.token) {
-                        .Whitespace => line.appendAssumeCapacity(' '),
-                        .Comma => line.appendSliceAssumeCapacity(", "),
-                        else => line.appendSliceAssumeCapacity(tok.data),
-                    }
-                }
-            },
-            .Source => FormatSourceLine(&line_tok, &line, &line_ctx),
+            .Source => FormatSourceLine(&line_lex, &line, &line_ctx),
             else => {},
         }
 
@@ -256,6 +303,7 @@ pub fn Format(
 
         line.clearRetainingCapacity();
         line_tok.clearRetainingCapacity();
+        line_lex.clearRetainingCapacity();
     }
 }
 
@@ -275,54 +323,49 @@ const LineContext = struct {
 /// @tok    tokenized source line, in the format produced by Token-related code
 /// @out    buffer must be empty for correct formatting
 fn FormatSourceLine(
-    tok: *std.ArrayListUnmanaged(Token),
+    lex: *std.ArrayListUnmanaged(Lexeme),
     out: *std.ArrayListUnmanaged(u8),
     ctx: *const LineContext,
 ) void {
     var b_label = false;
-    var b_state_initialized = false;
     var line_state: LineState = .Label;
 
     var fmtgen_ci: usize = 0; // utf-8 codepoints pushed
     var fmtgen_i: usize = 0;
     fmtgen: while (true) {
-        if (fmtgen_i >= tok.items.len) break :fmtgen;
+        if (fmtgen_i >= lex.items.len) break :fmtgen;
         line_state = switch (line_state) {
             .Label => ls: {
-                const next_s: LineState = if (std.mem.endsWith(u8, tok.items[fmtgen_i].data, ":")) st: {
-                    b_label = true;
+                assert(fmtgen_i == 0);
+                assert(fmtgen_ci == 0);
+
+                const t_len = lex.items[0].data[0].data.len;
+                b_label = lex.items[0].data[0].data[t_len - 1] == ':';
+                const next_s: LineState = if (b_label) st: {
                     break :st .Instruction;
                 } else st: { // if not followed by ':', assume it's an instruction
-                    TokPadSpaces(out, &fmtgen_ci, ctx.ColIns);
+                    PadSpaces(out, &fmtgen_ci, ctx.ColIns);
                     break :st .Operands;
                 };
-                TokAppend(out, tok.items, &fmtgen_i, &fmtgen_ci);
-                break :ls TokEndLinePart(&b_state_initialized, next_s);
+
+                LexAppend(out, &lex.items[fmtgen_i], &fmtgen_i, &fmtgen_ci);
+                break :ls next_s;
             },
             .Instruction => ls: {
-                if (!b_state_initialized) {
-                    b_state_initialized = true;
-                    TokPadSpaces(out, &fmtgen_ci, if (b_label) ctx.ColLabIns else ctx.ColIns);
-                }
-                TokSkipWhitespace(tok.items, &fmtgen_i);
-                TokAppend(out, tok.items, &fmtgen_i, &fmtgen_ci);
-                break :ls TokEndLinePart(&b_state_initialized, .Operands);
+                PadSpaces(out, &fmtgen_ci, if (b_label) ctx.ColLabIns else ctx.ColIns);
+                LexAppend(out, &lex.items[fmtgen_i], &fmtgen_i, &fmtgen_ci);
+                break :ls .Operands;
             },
             .Operands => ls: {
-                if (!b_state_initialized) {
-                    b_state_initialized = true;
-                    TokPadSpaces(out, &fmtgen_ci, if (b_label) ctx.ColLabOps else ctx.ColOps);
+                PadSpaces(out, &fmtgen_ci, if (b_label) ctx.ColLabOps else ctx.ColOps);
+                var prev_kind: LexemeKind = .Separator;
+                for (lex.items[fmtgen_i..]) |*l| {
+                    if (l.kind != .Separator and prev_kind != .Separator)
+                        PadSpaces(out, &fmtgen_ci, fmtgen_ci);
+                    LexAppend(out, l, &fmtgen_i, &fmtgen_ci);
+                    prev_kind = l.kind;
                 }
-                TokSkipWhitespace(tok.items, &fmtgen_i);
-                while (tok.items.len > fmtgen_i) {
-                    if (tok.items[fmtgen_i].token == .Comma) {
-                        TokAppendStr(out, &fmtgen_ci, ", ");
-                        fmtgen_i += 1;
-                    } else {
-                        TokAppend(out, tok.items, &fmtgen_i, &fmtgen_ci);
-                    }
-                }
-                break :ls TokEndLinePart(&b_state_initialized, .Comment);
+                break :ls .Comment;
             },
             // input stream should be done by this point, comment printing will
             // be handled externally
@@ -333,33 +376,30 @@ fn FormatSourceLine(
 
 // HELPERS
 
-fn TokSkipWhitespace(tok: []const Token, ti: *usize) void {
-    var i = ti.*;
-    while (i < tok.len and tok[i].token == .Whitespace)
-        i += 1;
-    ti.* = i;
-}
-
-fn TokPadSpaces(line: *std.ArrayListUnmanaged(u8), col: *usize, until: usize) void {
+/// add spaces up to given column, adding a minimum of 1 space for padding
+fn PadSpaces(line: *std.ArrayListUnmanaged(u8), col: *usize, until: usize) void {
     const n: usize = @max(1, until -| col.*);
     line.appendNTimesAssumeCapacity(32, n);
     col.* += n;
 }
 
-fn TokEndLinePart(next_initialized: *bool, next_state: LineState) LineState {
-    next_initialized.* = false;
-    return next_state;
-}
-
-fn TokAppend(line: *std.ArrayListUnmanaged(u8), tok: []const Token, i: *usize, ci: *usize) void {
-    line.appendSliceAssumeCapacity(tok[i.*].data);
-    ci.* += std.unicode.utf8CountCodepoints(tok[i.*].data) catch unreachable;
+/// appends the contents of a lexeme to a byte array, returning the number of
+/// utf-8 codepoints written
+fn LexAppend(line: *std.ArrayListUnmanaged(u8), lex: *Lexeme, i: *usize, ci: *usize) void {
+    switch (lex.kind) {
+        .None => unreachable,
+        .Separator => {
+            assert(lex.data.len == 1);
+            line.appendSliceAssumeCapacity(lex.data[0].data);
+            line.appendAssumeCapacity(' ');
+            ci.* += 1 + (std.unicode.utf8CountCodepoints(lex.data[0].data) catch unreachable);
+        },
+        .Word => for (lex.data) |t| {
+            line.appendSliceAssumeCapacity(t.data);
+            ci.* += std.unicode.utf8CountCodepoints(t.data) catch unreachable;
+        },
+    }
     i.* += 1;
-}
-
-fn TokAppendStr(line: *std.ArrayListUnmanaged(u8), ci: *usize, str: []const u8) void {
-    line.appendSliceAssumeCapacity(str);
-    ci.* += str.len;
 }
 
 // TESTING
@@ -388,6 +428,10 @@ test "initial test to get things going plis rework/rename this later or else bro
             .in = " \t  mov  eax,16; comment",
             .ex = "    mov     eax, 16                     ; comment\n",
         },
+        .{ // bracketed scope
+            .in = " \t  mov  dword[eax + ebp*2],16; comment",
+            .ex = "    mov     dword [eax+ebp*2], 16       ; comment\n",
+        },
         // NOTE: curiously, this passes whether or not the input has a trailing
         //  newline
         .{ // multiline with lone "label header"
@@ -413,6 +457,14 @@ test "initial test to get things going plis rework/rename this later or else bro
             .in = "  my_label:\r\n\r\nmov eax,16; comment",
             .ex = "my_label:\r\n\r\n    mov     eax, 16                     ; comment\n",
         },
+        .{ // extern (assembler directive)
+            .in = "extern _SomeFunctionName@12",
+            .ex = "extern _SomeFunctionName@12\n",
+        },
+        .{ // primitive assembler directive
+            .in = " [ section  .text ] ",
+            .ex = "[section .text]\n",
+        },
         .{ // %macro (case-insensitive)
             .in = "%mACRO CoolMacro 2",
             .ex = "%macro CoolMacro 2\n",
@@ -424,10 +476,6 @@ test "initial test to get things going plis rework/rename this later or else bro
         .{ // %endmacro (case-insensitive)
             .in = "%enDMACro",
             .ex = "%endmacro\n",
-        },
-        .{ // extern (assembler directive)
-            .in = "extern _SomeFunctionName@12",
-            .ex = "extern _SomeFunctionName@12\n",
         },
         .{ // misc preprocessor directive
             .in = "%pragma    something",
