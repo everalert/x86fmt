@@ -15,19 +15,19 @@ const PadSpaces = @import("util.zig").PadSpaces;
 pub const Error = error{SourceContainsBOM};
 
 pub const Settings = struct {
-    TabSize: usize = 4,
+    TabSize: usize,
     /// Comment column, when line is not a standalone comment.
-    ComCol: usize = 40,
+    ComCol: usize,
     /// Columns between start of label and instruction, rounded up to next multiple
     /// of TabSize. Lines without a label will ignore this setting and inset the
     /// instruction by TabSize.
-    InsMinGap: usize = 12,
+    InsMinGap: usize,
     /// Columns between start of instruction and start of operands, rounded up to
     /// the next multiple of TabSize.
-    OpsMinGap: usize = 8,
+    OpsMinGap: usize,
     /// Maximum number of consecutive blank lines; large gaps will be folded to
     /// this number. Lines with comments do not count toward blanks.
-    MaxBlankLines: usize = 2,
+    MaxBlankLines: usize,
 };
 
 pub fn Formatter(
@@ -350,7 +350,14 @@ test "Format" {
         var output = std.ArrayList(u8).init(std.testing.allocator);
         defer output.deinit();
 
-        const f = fmt.Format(input.reader(), output.writer(), .{});
+        const f = fmt.Format(input.reader(), output.writer(), .{
+            .TabSize = 4,
+            .ComCol = 40,
+            .InsMinGap = 12,
+            .OpsMinGap = 8,
+            .MaxBlankLines = 2,
+        });
+
         if (t.err) |ex_err| {
             try std.testing.expectError(ex_err, f);
         } else {

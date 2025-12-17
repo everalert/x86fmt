@@ -37,7 +37,7 @@ pub fn main() !void {
     var bw = std.io.bufferedWriter(fo.writer());
 
     const fmt = Formatter(BUF_SIZE_LINE_IO, BUF_SIZE_LINE_TOK, BUF_SIZE_LINE_LEX, BUF_SIZE_TOK);
-    try fmt.Format(br.reader(), bw.writer(), .{}); // FIXME: handle
+    try fmt.Format(br.reader(), bw.writer(), cli.FmtSettings); // FIXME: handle
 
     bw.flush() catch unreachable; // FIXME: handle
     fo.close();
