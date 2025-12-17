@@ -74,14 +74,14 @@ pub fn Parse(alloc: Allocator) !CLI {
             continue;
         }
 
-        if (o_kind == null and eql(u8, arg, "-co")) {
-            o_kind = .Console;
-            continue;
-        }
-
         if (o_kind == null and eql(u8, arg, "-fo")) {
             o_kind = .File;
             b_output_file_flag = true;
+            continue;
+        }
+
+        if (o_kind == null and eql(u8, arg, "-co")) {
+            o_kind = .Console;
             continue;
         }
 
@@ -89,6 +89,8 @@ pub fn Parse(alloc: Allocator) !CLI {
             b_show_help = true;
             break;
         }
+
+        if (i_kind != null) break;
 
         i_kind = .File;
         i_file = try alloc.dupeZ(u8, arg);
