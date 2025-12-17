@@ -3,7 +3,12 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
 const CLI = @import("cli.zig");
-const Format = @import("format.zig");
+const Formatter = @import("format.zig").Formatter;
+
+const BUF_SIZE_LINE_IO = 4096;
+const BUF_SIZE_LINE_TOK = 1024;
+const BUF_SIZE_LINE_LEX = 1024;
+const BUF_SIZE_TOK = 256;
 
 var mem: [4096]u8 = undefined;
 
@@ -31,7 +36,8 @@ pub fn main() !void {
     var br = std.io.bufferedReader(fi.reader());
     var bw = std.io.bufferedWriter(fo.writer());
 
-    try Format.Format(br.reader(), bw.writer(), .{}); // FIXME: handle
+    const fmt = Formatter(BUF_SIZE_LINE_IO, BUF_SIZE_LINE_TOK, BUF_SIZE_LINE_LEX, BUF_SIZE_TOK);
+    try fmt.Format(br.reader(), bw.writer(), .{}); // FIXME: handle
 
     bw.flush() catch unreachable; // FIXME: handle
     fo.close();

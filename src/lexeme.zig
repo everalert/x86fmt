@@ -8,9 +8,6 @@ const BLAND = @import("util.zig").BLAND;
 const BLOR = @import("util.zig").BLOR;
 const PadSpaces = @import("util.zig").PadSpaces;
 
-// FIXME: import from global settings
-const BUF_SIZE_TOK = 256;
-
 pub const Kind = enum(u8) { None, Word, Separator };
 
 pub const Opts = packed struct(u32) {
@@ -82,8 +79,9 @@ pub inline fn BufAppend(
     lex: *const Lexeme,
     i: *usize,
     ci: *usize,
+    comptime BUF_SIZE_TOK: usize,
 ) void {
-    BufAppendOpts(out, lex, i, ci, .{});
+    BufAppendOpts(out, lex, i, ci, .{}, BUF_SIZE_TOK);
 }
 
 /// appends the contents of a lexeme to a byte array, advancing the provided
@@ -94,6 +92,7 @@ pub fn BufAppendOpts(
     i: *usize,
     ci: *usize,
     opts: Lexeme.Opts,
+    comptime BUF_SIZE_TOK: usize,
 ) void {
     switch (lex.kind) {
         .None => unreachable,
@@ -135,12 +134,13 @@ pub fn BufAppendSlice(
     i: *usize,
     ci: *usize,
     opts: Lexeme.Opts,
+    comptime BUF_SIZE_TOK: usize,
 ) void {
     var prev_kind: Lexeme.Kind = .None;
     for (lexemes, 0..) |*lex, li| {
         if (BLAND(li > 0, BLAND(lex.kind != .Separator, prev_kind != .Separator)))
             PadSpaces(out, ci, i.*);
-        BufAppendOpts(out, lex, i, ci, opts);
+        BufAppendOpts(out, lex, i, ci, opts, BUF_SIZE_TOK);
         prev_kind = lex.kind;
     }
 }
