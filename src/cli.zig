@@ -45,11 +45,7 @@ OKind: IOKind,
 IFile: []const u8,
 OFile: []const u8,
 
-// TODO: maybe switch back to passing in allocator, creating owned slices of paths
-//  in the output, and properly deinit-ing the iterator
 /// Parse command line arguments and generate a CLI settings object.
-/// @buf    memory used as persistent storage for cli arguments; memory must be
-///         kept valid until any file paths in the output have been consumed
 pub fn Parse(alloc: Allocator) !CLI {
     var i_kind: ?IOKind = null;
     var o_kind: ?IOKind = null;
