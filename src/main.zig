@@ -2,14 +2,42 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
-pub fn main() !void {
-    var stdi = std.io.getStdIn();
-    const stdi_br = std.io.bufferedReader(stdi.reader());
-    var stdo = std.io.getStdOut();
-    const stdo_bw = std.io.bufferedWriter(stdo.writer());
-    defer stdo_bw.flush();
+const CLI = @import("cli.zig");
 
-    try Format(stdi_br.reader(), stdo_bw.writer(), .{});
+var cli_buf: [4096]u8 = undefined;
+
+// TODO: replace input file with temp at the end if both files are the same
+pub fn main() !void {
+    var cli_fba = std.heap.FixedBufferAllocator.init(&cli_buf);
+    const cli = try CLI.Parse(cli_fba.allocator()); // FIXME: handle
+    if (cli.bShowHelp) {
+        var stdo = std.io.getStdOut();
+        _ = try stdo.write("x86fmt help\n\n\tHelp text not written yet, sorry...\n\n");
+        return;
+    }
+
+    const fi, var br = reader: {
+        const file = switch (cli.IKind) {
+            .File => try std.fs.cwd().openFile(cli.IFile, .{}),
+            .Console => std.io.getStdIn(),
+        };
+        const stdi_br = std.io.bufferedReader(file.reader());
+        break :reader .{ file, stdi_br };
+    };
+    defer fi.close();
+
+    const fo, var bw = writer: {
+        const file = switch (cli.OKind) {
+            .File => try std.fs.cwd().createFile(cli.OFile, .{}),
+            .Console => std.io.getStdOut(),
+        };
+        const bw = std.io.bufferedWriter(file.writer());
+        break :writer .{ file, bw };
+    };
+    defer fo.close();
+    defer bw.flush() catch unreachable; // FIXME: handle
+
+    try Format(br.reader(), bw.writer(), .{}); // FIXME: handle
 }
 
 // TODO: comptime or runtime config
@@ -25,7 +53,7 @@ var ScrBufLine = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
 var TokBufLine = std.mem.zeroes([BUF_SIZE_LINE_TOK]Token);
 var LexBufLine = std.mem.zeroes([BUF_SIZE_LINE_LEX]Lexeme);
 
-const TokenKind = enum(u8) { None, String, MathOp, Comma, Backslash, Whitespace, Scope };
+const TokenKind = enum(u8) { None, String, MathOp, Scope, Comma, Backslash, Whitespace };
 
 const Token = struct {
     kind: TokenKind = .None,
