@@ -285,15 +285,10 @@ pub fn Format(
             .AsmDirective, .PreProcDirective, .Macro => {
                 var fmtgen_i: usize = 0;
                 var fmtgen_ci: usize = 0;
-
                 LexAppendOpts(&line, &line_lex.items[0], &fmtgen_i, &fmtgen_ci, .{ .bHeadToLower = true });
-
-                var prev_kind: LexemeKind = .Word;
-                for (line_lex.items[1..]) |*l| {
-                    if (BLAND(l.kind != .Separator, prev_kind != .Separator))
-                        PadSpaces(&line, &fmtgen_ci, fmtgen_ci);
-                    LexAppend(&line, l, &fmtgen_i, &fmtgen_ci);
-                    prev_kind = l.kind;
+                if (line_lex.items.len > 1) {
+                    PadSpaces(&line, &fmtgen_ci, fmtgen_ci);
+                    LexAppendSlice(&line, line_lex.items[1..], &fmtgen_i, &fmtgen_ci, .{});
                 }
             },
             .Source => FormatSourceLine(&line_lex, &line, &line_ctx),
@@ -335,15 +330,11 @@ fn FormatSourceLine(
 ) void {
     var b_label = false;
     var line_state: LineState = .Label;
-
     var fmtgen_ci: usize = 0; // utf-8 codepoints pushed
     var fmtgen_i: usize = 0;
     while (fmtgen_i < lex.items.len) {
         line_state = switch (line_state) {
             .Label => ls: {
-                assert(fmtgen_i == 0);
-                assert(fmtgen_ci == 0);
-
                 const t_len = lex.items[0].data[0].data.len;
                 b_label = lex.items[0].data[0].data[t_len - 1] == ':';
                 const next_s: LineState = if (b_label) st: {
@@ -363,13 +354,7 @@ fn FormatSourceLine(
             },
             .Operands => ls: {
                 PadSpaces(out, &fmtgen_ci, if (b_label) ctx.ColLabOps else ctx.ColOps);
-                var prev_kind: LexemeKind = .Separator;
-                for (lex.items[fmtgen_i..]) |*l| {
-                    if (BLAND(l.kind != .Separator, prev_kind != .Separator))
-                        PadSpaces(out, &fmtgen_ci, fmtgen_ci);
-                    LexAppend(out, l, &fmtgen_i, &fmtgen_ci);
-                    prev_kind = l.kind;
-                }
+                LexAppendSlice(out, lex.items[fmtgen_i..], &fmtgen_i, &fmtgen_ci, .{});
                 break :ls .Comment;
             },
             // input stream should be done by this point, comment printing will
@@ -388,14 +373,15 @@ fn PadSpaces(line: *std.ArrayListUnmanaged(u8), col: *usize, until: usize) void 
     col.* += n;
 }
 
-/// appends the contents of a lexeme to a byte array, returning the number of
-/// utf-8 codepoints written
-inline fn LexAppend(line: *std.ArrayListUnmanaged(u8), lex: *Lexeme, i: *usize, ci: *usize) void {
+/// appends the contents of a lexeme to a byte array, advancing the provided
+/// utf-8 codepoint counter
+inline fn LexAppend(line: *std.ArrayListUnmanaged(u8), lex: *const Lexeme, i: *usize, ci: *usize) void {
     LexAppendOpts(line, lex, i, ci, .{});
 }
-/// appends the contents of a lexeme to a byte array, returning the number of
-/// utf-8 codepoints written
-fn LexAppendOpts(line: *std.ArrayListUnmanaged(u8), lex: *Lexeme, i: *usize, ci: *usize, opts: LexemeOpts) void {
+
+/// appends the contents of a lexeme to a byte array, advancing the provided
+/// utf-8 codepoint counter
+fn LexAppendOpts(line: *std.ArrayListUnmanaged(u8), lex: *const Lexeme, i: *usize, ci: *usize, opts: LexemeOpts) void {
     switch (lex.kind) {
         .None => unreachable,
         .Separator => {
@@ -404,17 +390,15 @@ fn LexAppendOpts(line: *std.ArrayListUnmanaged(u8), lex: *Lexeme, i: *usize, ci:
             line.appendAssumeCapacity(' ');
             ci.* += 1 + (std.unicode.utf8CountCodepoints(lex.data[0].data) catch unreachable);
         },
-        // FIXME: maybe just:
-        //  if token_prev_kind==.String and token_kind==.string, add space first
-        //  * may want similar logic for "sentence" emission too, as well as the
-        //    separator logic from there to here
         .Word => {
             var t_kind_prev: TokenKind = .None;
             var b_lower_emitted = false;
             for (lex.data) |t| {
                 defer t_kind_prev = t.kind;
+
                 if (BLAND(t.kind == .String, t.kind == t_kind_prev))
                     line.appendAssumeCapacity(' ');
+
                 if (BLAND(t.kind == .String, BLOR(opts.bToLower, BLAND(opts.bHeadToLower, !b_lower_emitted)))) {
                     var buf: [BUF_SIZE_TOK]u8 = undefined;
                     const lower = std.ascii.lowerString(&buf, t.data);
@@ -428,6 +412,24 @@ fn LexAppendOpts(line: *std.ArrayListUnmanaged(u8), lex: *Lexeme, i: *usize, ci:
         },
     }
     i.* += 1;
+}
+
+/// appends a series of lexemes to a byte array, advancing the provided utf-8
+/// codepoint counter
+fn LexAppendSlice(
+    line: *std.ArrayListUnmanaged(u8),
+    lexemes: []const Lexeme,
+    i: *usize,
+    ci: *usize,
+    opts: LexemeOpts,
+) void {
+    var prev_kind: LexemeKind = .None;
+    for (lexemes, 0..) |*lex, li| {
+        if (BLAND(li > 0, BLAND(lex.kind != .Separator, prev_kind != .Separator)))
+            PadSpaces(line, ci, i.*);
+        LexAppendOpts(line, lex, i, ci, opts);
+        prev_kind = lex.kind;
+    }
 }
 
 // UTIL
@@ -457,6 +459,7 @@ test "initial test to get things going plis rework/rename this later or else bro
         ex: []const u8 = &[_]u8{},
         err: ?FormatError = null,
     };
+
     const test_cases = [_]FormatTestCase{
         .{ // BOM
             .in = &[_]u8{ 0xEF, 0xBB, 0xBF } ++ " \t  my_label: mov eax,16; comment",
@@ -474,8 +477,6 @@ test "initial test to get things going plis rework/rename this later or else bro
             .in = " \t  mov  dword[eax + ebp*2],16; comment",
             .ex = "    mov     dword [eax+ebp*2], 16       ; comment\n",
         },
-        // NOTE: curiously, this passes whether or not the input has a trailing
-        //  newline
         .{ // multiline with lone "label header"
             .in =
             \\    my_label:
