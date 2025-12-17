@@ -1,6 +1,7 @@
 .notes/
 .release/
 **/.clang-format
+**.tmp
 
 .zig-cache/
 .zig-out/

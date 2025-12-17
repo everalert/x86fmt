@@ -10,8 +10,7 @@ var cli_buf: [4096]u8 = undefined;
 
 // TODO: replace input file with temp at the end if both files are the same
 pub fn main() !void {
-    var cli_fba = std.heap.FixedBufferAllocator.init(&cli_buf);
-    const cli = try CLI.Parse(cli_fba.allocator()); // FIXME: handle
+    const cli = try CLI.Parse(&cli_buf); // FIXME: handle
     if (cli.bShowHelp) {
         var stdo = std.io.getStdOut();
         _ = try stdo.write("x86fmt help\n\n\tHelp text not written yet, sorry...\n\n");

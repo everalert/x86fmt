@@ -24,7 +24,6 @@
 const CLI = @This();
 
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const eql = std.mem.eql;
 
@@ -41,18 +40,20 @@ OKind: IOKind,
 IFile: []const u8,
 OFile: []const u8,
 
+// TODO: maybe switch back to passing in allocator, creating owned slices of paths
+//  in the output, and properly deinit-ing the iterator
 /// Parse command line arguments and generate a CLI settings object.
-pub fn Parse(alloc: Allocator) !CLI {
+/// @buf    memory used as persistent storage for cli arguments; memory must be
+///         kept valid until any file paths in the output have been consumed
+pub fn Parse(buf: []u8) !CLI {
     var i_kind: ?IOKind = null;
     var o_kind: ?IOKind = null;
     var i_file: []const u8 = &[_]u8{};
     var o_file: []const u8 = &[_]u8{};
     var b_show_help = false;
 
-    // FIXME: memory leak here. commented out because it was clearing args from
-    //  memory and interfering with testing, but this should be setup in a way
-    //  that you can keep the arg strings after function scope ends
-    var args = try std.process.argsWithAllocator(alloc);
+    var cli_fba = std.heap.FixedBufferAllocator.init(buf);
+    var args = try std.process.argsWithAllocator(cli_fba.allocator());
     //defer args.deinit();
 
     var b_awaiting_output_file = false;
