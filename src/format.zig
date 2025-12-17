@@ -17,7 +17,6 @@ const BUF_SIZE_LINE_IO = 4096;
 const BUF_SIZE_LINE_TOK = 1024;
 const BUF_SIZE_LINE_LEX = 1024;
 const BUF_SIZE_TOK = 256;
-const MAX_CONSECUTIVE_BLANK_LINES = 2;
 
 // TODO: ring buffer, to support line lookback
 var OutBufLine = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
@@ -38,6 +37,9 @@ pub const Settings = struct {
     /// Columns between start of instruction and start of operands, rounded up to
     /// the next multiple of TabSize.
     OpsMinGap: usize = 8,
+    /// Maximum number of consecutive blank lines; large gaps will be folded to
+    /// this number. Lines with comments do not count toward blanks.
+    MaxBlankLines: usize = 2,
 };
 
 // NOTE: logic based on chapter 3, 5 and 8 of the NASM documentation, with some
@@ -123,7 +125,7 @@ pub fn Format(
         // the irony of nested conditional branches immediately after branchless and
         blank_lines = (blank_lines + 1) * IBLAND(body.len == 0, comment.len == 0);
         if (blank_lines > 0) {
-            if (blank_lines <= MAX_CONSECUTIVE_BLANK_LINES)
+            if (blank_lines <= settings.MaxBlankLines)
                 _ = out.write(if (b_crlf) "\r\n" else "\n") catch unreachable; // FIXME: handle
             continue;
         }
