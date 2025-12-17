@@ -12,6 +12,18 @@ pub fn main() !void {
     try Format(stdi_br.reader(), stdo_bw.writer(), .{});
 }
 
+// TODO: comptime config
+const BUF_SIZE_LINE_IO = 4096;
+const BUF_SIZE_LINE_TOK = 1024;
+const BUF_SIZE_LINE_LEX = 1024;
+const BUF_SIZE_TOK = 256;
+
+// TODO: ring buffer, to support line lookback
+var OutBufLine = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
+var ScrBufLine = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
+var TokBufLine = std.mem.zeroes([BUF_SIZE_LINE_TOK]Token);
+var LexBufLine = std.mem.zeroes([BUF_SIZE_LINE_LEX]Lexeme);
+
 const TokenKind = enum(u8) { None, String, MathOp, Comma, Backslash, Whitespace, Scope };
 
 const Token = struct {
@@ -32,27 +44,17 @@ const LexemeOpts = packed struct(u32) {
     _: u30 = 0,
 };
 
-const LineMode = enum { Blank, Unknown, Comment, Source, Macro, AsmDirective, PreProcDirective };
-
 // NOTE: assembler directives: 'primitive' directives enclosed in square brackets,
 //  'user-level' directives are bare
 // NOTE: see chapter 8 (p.101)
 /// identifiers that can appear as first word on a directive line, including aliases
 const AssemblerDirective = enum { bits, use16, use32, default, section, segment, absolute, @"extern", required, global, common, static, prefix, gprefix, lprefix, suffix, gsuffix, lsuffix, cpu, dollarhex, float, warning, list };
 
-// TODO: comptime config
-const BUF_SIZE_LINE_IO = 4096;
-const BUF_SIZE_LINE_TOK = 1024;
-const BUF_SIZE_LINE_LEX = 1024;
-const BUF_SIZE_TOK = 256;
-// TODO: ring buffer, to support line lookback
-var OutBufLine = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
-var ScrBufLine = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
-var TokBufLine = std.mem.zeroes([BUF_SIZE_LINE_TOK]Token);
-var LexBufLine = std.mem.zeroes([BUF_SIZE_LINE_LEX]Lexeme);
+const LineState = enum { Label, Instruction, Operands, Comment };
+
+const LineMode = enum { Blank, Unknown, Comment, Source, Macro, AsmDirective, PreProcDirective };
 
 const FormatError = error{SourceContainsBOM};
-const LineState = enum { Label, Instruction, Operands, Comment };
 
 const FormatSettings = struct {
     TabSize: usize = 4,
@@ -123,12 +125,13 @@ pub fn Format(
                 defer escaped = will_escape;
                 switch (c) {
                     '\\' => {
-                        if (scope != null and !escaped)
+                        if (BLAND(scope != null, !escaped))
                             will_escape = true;
                     },
                     '\"', '\'', '`' => {
                         if (scope) |s| {
-                            if (s == c and !escaped) scope = null;
+                            if (BLAND(s == c, !escaped))
+                                scope = null;
                             continue;
                         }
                         scope = c;
@@ -171,9 +174,12 @@ pub fn Format(
                     // skip whitespace, will be reinserted based on context
                     while (true) {
                         const peek_s = tokgen_it.peek(1);
-                        if (peek_s.len == 0 or
-                            (peek_s.len == 1 and std.mem.indexOfScalar(u8, " \t", peek_s[0]) == null))
-                            break;
+                        const peek_chars = " \t";
+                        if (BLOR(
+                            peek_s.len == 0,
+                            peek_s.len == 1 and std.mem.indexOfScalar(u8, peek_chars, peek_s[0]) == null,
+                        )) break;
+
                         _ = tokgen_it.nextCodepoint();
                     }
                     _ = line_tok.pop();
@@ -182,9 +188,12 @@ pub fn Format(
                     token.kind = .String;
                     while (true) {
                         const peek_s = tokgen_it.peek(1);
-                        if (peek_s.len == 0 or
-                            (peek_s.len == 1 and std.mem.indexOfScalar(u8, ", \t([{}])\"'`\\", peek_s[0]) != null))
-                            break;
+                        const peek_chars = ", \t([{}])\"'`\\";
+                        if (BLOR(
+                            peek_s.len == 0,
+                            (peek_s.len == 1 and std.mem.indexOfScalar(u8, peek_chars, peek_s[0]) != null),
+                        )) break;
+
                         _ = tokgen_it.nextCodepoint();
                     }
                     token.data = body[start_i..tokgen_it.i];
@@ -217,10 +226,10 @@ pub fn Format(
                     .Scope => {
                         if (scope != null) {
                             const ci = std.mem.indexOfScalar(u8, scope_closer, t.data[0]);
-                            if (ci != null and
-                                scope_opener[ci.?] == scope.? and
-                                !(scope_escapable[ci.?] and prev_token_kind == .Backslash))
-                            {
+                            if (ci != null and BLAND(
+                                scope_opener[ci.?] == scope.?,
+                                !BLAND(scope_escapable[ci.?], prev_token_kind == .Backslash),
+                            )) {
                                 scope = null;
                                 emit_lexeme = .Word;
                             }
@@ -291,7 +300,7 @@ pub fn Format(
                     LexAppendSlice(&line, line_lex.items[1..], &fmtgen_i, &fmtgen_ci, .{});
                 }
             },
-            .Source => FormatSourceLine(&line_lex, &line, &line_ctx),
+            .Source => FormatSourceLine(&line, line_lex.items, &line_ctx),
             else => {},
         }
 
@@ -324,19 +333,19 @@ const LineContext = struct {
 /// @tok    tokenized source line, in the format produced by Token-related code
 /// @out    buffer must be empty for correct formatting
 fn FormatSourceLine(
-    lex: *std.ArrayListUnmanaged(Lexeme),
     out: *std.ArrayListUnmanaged(u8),
+    lex: []const Lexeme,
     ctx: *const LineContext,
 ) void {
     var b_label = false;
     var line_state: LineState = .Label;
     var fmtgen_ci: usize = 0; // utf-8 codepoints pushed
     var fmtgen_i: usize = 0;
-    while (fmtgen_i < lex.items.len) {
+    while (fmtgen_i < lex.len) {
         line_state = switch (line_state) {
             .Label => ls: {
-                const t_len = lex.items[0].data[0].data.len;
-                b_label = lex.items[0].data[0].data[t_len - 1] == ':';
+                const t_len = lex[0].data[0].data.len;
+                b_label = lex[0].data[0].data[t_len - 1] == ':';
                 const next_s: LineState = if (b_label) st: {
                     break :st .Instruction;
                 } else st: { // if not followed by ':', assume it's an instruction
@@ -344,17 +353,17 @@ fn FormatSourceLine(
                     break :st .Operands;
                 };
 
-                LexAppend(out, &lex.items[fmtgen_i], &fmtgen_i, &fmtgen_ci);
+                LexAppend(out, &lex[fmtgen_i], &fmtgen_i, &fmtgen_ci);
                 break :ls next_s;
             },
             .Instruction => ls: {
                 PadSpaces(out, &fmtgen_ci, if (b_label) ctx.ColLabIns else ctx.ColIns);
-                LexAppend(out, &lex.items[fmtgen_i], &fmtgen_i, &fmtgen_ci);
+                LexAppend(out, &lex[fmtgen_i], &fmtgen_i, &fmtgen_ci);
                 break :ls .Operands;
             },
             .Operands => ls: {
                 PadSpaces(out, &fmtgen_ci, if (b_label) ctx.ColLabOps else ctx.ColOps);
-                LexAppendSlice(out, lex.items[fmtgen_i..], &fmtgen_i, &fmtgen_ci, .{});
+                LexAppendSlice(out, lex[fmtgen_i..], &fmtgen_i, &fmtgen_ci, .{});
                 break :ls .Comment;
             },
             // input stream should be done by this point, comment printing will
