@@ -24,6 +24,7 @@
 const CLI = @This();
 
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const eql = std.mem.eql;
 
@@ -35,6 +36,10 @@ pub const IOKind = enum { Console, File };
 pub const CLIError = error{OutputFileUnknown};
 
 bShowHelp: bool,
+/// implies that IKind and OKind are both File. if true, OFile will match IFile
+/// but with ".tmp" appended; after formatting, the caller can simply delete
+/// IFile and rename OFile in response to this being true.
+bIOFileSame: bool, // if true,
 IKind: IOKind,
 OKind: IOKind,
 IFile: []const u8,
@@ -45,16 +50,16 @@ OFile: []const u8,
 /// Parse command line arguments and generate a CLI settings object.
 /// @buf    memory used as persistent storage for cli arguments; memory must be
 ///         kept valid until any file paths in the output have been consumed
-pub fn Parse(buf: []u8) !CLI {
+pub fn Parse(alloc: Allocator) !CLI {
     var i_kind: ?IOKind = null;
     var o_kind: ?IOKind = null;
     var i_file: []const u8 = &[_]u8{};
     var o_file: []const u8 = &[_]u8{};
     var b_show_help = false;
+    var b_io_file_same = false;
 
-    var cli_fba = std.heap.FixedBufferAllocator.init(buf);
-    var args = try std.process.argsWithAllocator(cli_fba.allocator());
-    //defer args.deinit();
+    var args = try std.process.argsWithAllocator(alloc);
+    defer args.deinit();
 
     var b_awaiting_output_file = false;
     var b_first_skipped = false;
@@ -69,7 +74,7 @@ pub fn Parse(buf: []u8) !CLI {
         }
 
         if (b_awaiting_output_file) {
-            o_file = arg;
+            o_file = try alloc.dupeZ(u8, arg);
             continue;
         }
 
@@ -90,23 +95,33 @@ pub fn Parse(buf: []u8) !CLI {
         }
 
         i_kind = .File;
-        i_file = arg;
+        i_file = try alloc.dupeZ(u8, arg);
     }
 
     if (b_awaiting_output_file)
-        return error.OutputFileUnknown;
+        return CLIError.OutputFileUnknown;
 
     if (i_kind == null) i_kind = .Console;
     if (o_kind == null) o_kind = i_kind;
-    if (o_kind == .File and o_file.len == 0) o_file = i_file;
+    if (o_kind == .File and o_file.len == 0) {
+        o_file = try std.fmt.allocPrintZ(alloc, "{s}.tmp", .{i_file});
+        b_io_file_same = true;
+    }
 
     assert(i_kind != .File or i_file.len > 0);
     assert(o_kind != .File or o_file.len > 0);
     return CLI{
         .bShowHelp = b_show_help,
+        .bIOFileSame = b_io_file_same,
         .IKind = i_kind.?,
         .OKind = o_kind.?,
         .IFile = i_file,
         .OFile = o_file,
     };
+}
+
+/// should be called with the original allocator if either IKind or OKind are File
+pub fn Deinit(self: *CLI, alloc: Allocator) void {
+    alloc.free(self.IFile);
+    alloc.free(self.OFile);
 }

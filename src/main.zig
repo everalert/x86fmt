@@ -3,14 +3,15 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
 const CLI = @import("cli.zig");
-var cli_buf: [4096]u8 = undefined;
+var mem: [4096]u8 = undefined;
 
 // FIXME: add tests for app itself (via separate build step that runs the program
 //  with different intputs), testing different i/o configurations and cli opts
-
-// TODO: replace input file with temp at the end if both files are the same
 pub fn main() !void {
-    const cli = try CLI.Parse(&cli_buf); // FIXME: handle
+    var fba = std.heap.FixedBufferAllocator.init(&mem);
+    const alloc = fba.allocator();
+    const cli = try CLI.Parse(alloc); // FIXME: handle
+
     if (cli.bShowHelp) {
         var stdo = std.io.getStdOut();
         _ = try stdo.write("x86fmt help\n\n\tHelp text not written yet, sorry...\n\n");
@@ -25,7 +26,6 @@ pub fn main() !void {
         const stdi_br = std.io.bufferedReader(file.reader());
         break :reader .{ file, stdi_br };
     };
-    defer fi.close();
 
     const fo, var bw = writer: {
         const file = switch (cli.OKind) {
@@ -35,10 +35,17 @@ pub fn main() !void {
         const bw = std.io.bufferedWriter(file.writer());
         break :writer .{ file, bw };
     };
-    defer fo.close();
-    defer bw.flush() catch unreachable; // FIXME: handle
 
     try Format(br.reader(), bw.writer(), .{}); // FIXME: handle
+
+    bw.flush() catch unreachable; // FIXME: handle
+    fo.close();
+    fi.close();
+
+    if (cli.bIOFileSame) {
+        try std.fs.cwd().deleteFile(cli.IFile);
+        try std.fs.cwd().rename(cli.OFile, cli.IFile);
+    }
 }
 
 // TODO: comptime or runtime config
