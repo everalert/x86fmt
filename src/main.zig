@@ -12,11 +12,12 @@ pub fn main() !void {
     try Format(stdi_br.reader(), stdo_bw.writer(), .{});
 }
 
-// TODO: comptime config
+// TODO: comptime or runtime config
 const BUF_SIZE_LINE_IO = 4096;
 const BUF_SIZE_LINE_TOK = 1024;
 const BUF_SIZE_LINE_LEX = 1024;
 const BUF_SIZE_TOK = 256;
+const MAX_CONSECUTIVE_BLANK_LINES = 2;
 
 // TODO: ring buffer, to support line lookback
 var OutBufLine = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
@@ -81,6 +82,7 @@ pub fn Format(
     var line = std.ArrayListUnmanaged(u8).initBuffer(&OutBufLine);
     var line_tok = std.ArrayListUnmanaged(Token).initBuffer(&TokBufLine);
     var line_lex = std.ArrayListUnmanaged(Lexeme).initBuffer(&LexBufLine);
+    var blank_lines: usize = 0;
 
     const line_ctx: LineContext = .{
         .ColCom = settings.ComCol,
@@ -147,6 +149,14 @@ pub fn Format(
 
             break :comgen .{ b_crlf, std.mem.trim(u8, body_s, "\t "), com_s };
         };
+
+        // the irony of nested conditional branches immediately after branchless and
+        blank_lines = (blank_lines + 1) * IBLAND(body.len == 0, comment.len == 0);
+        if (blank_lines > 0) {
+            if (blank_lines <= MAX_CONSECUTIVE_BLANK_LINES)
+                _ = out.write(if (b_crlf) "\r\n" else "\n") catch unreachable; // FIXME: handle
+            continue;
+        }
 
         var tokgen_it = std.unicode.Utf8Iterator{ .bytes = body, .i = 0 };
         tokgen: while (true) {
@@ -445,14 +455,24 @@ fn LexAppendSlice(
 
 // TODO: confirm these actually make a difference vs natural codegen
 
+/// branchless and -> integer
+inline fn IBLAND(b1: bool, b2: bool) usize {
+    return @intFromBool(b1) & @intFromBool(b2);
+}
+
 /// branchless and
 inline fn BLAND(b1: bool, b2: bool) bool {
-    return @intFromBool(b1) & @intFromBool(b2) > 0;
+    return IBLAND(b1, b2) > 0;
+}
+
+/// branchless or -> integer
+inline fn IBLOR(b1: bool, b2: bool) usize {
+    return @intFromBool(b1) | @intFromBool(b2);
 }
 
 /// branchless or
 inline fn BLOR(b1: bool, b2: bool) bool {
-    return @intFromBool(b1) | @intFromBool(b2) > 0;
+    return IBLOR(b1, b2) > 0;
 }
 
 // TESTING
@@ -508,6 +528,29 @@ test "initial test to get things going plis rework/rename this later or else bro
         .{ // double multiline crlf
             .in = "  my_label:\r\n\r\nmov eax,16; comment",
             .ex = "my_label:\r\n\r\n    mov     eax, 16                     ; comment\n",
+        },
+        .{ // 3 blank lines -> fold to 2
+            .in = "  my_label:\n\n\n\nmov eax,16; comment",
+            .ex = "my_label:\n\n\n    mov     eax, 16                     ; comment\n",
+        },
+        .{ // 3 blank lines with comment -> not folded
+            .in =
+            \\my_label:
+            \\
+            \\; comment1
+            \\
+            \\mov eax,16; comment2
+            ,
+            // FIXME: comment1 will be in wrong position after more advanced
+            //  comment formatting is implemented
+            .ex =
+            \\my_label:
+            \\
+            \\                                        ; comment1
+            \\
+            \\    mov     eax, 16                     ; comment2
+            \\
+            ,
         },
         .{ // extern (assembler directive)
             .in = "extern _SomeFunctionName@12",
