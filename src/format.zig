@@ -145,6 +145,13 @@ pub fn Formatter(
                     continue;
                 }
 
+                // TODO: smart comment positioning based on prev/next lines
+                if (BLAND(body.len == 0, comment.len > 0)) {
+                    _ = out.write(comment) catch unreachable; // FIXME: handle
+                    _ = out.write("\n") catch unreachable; // FIXME: handle
+                    continue;
+                }
+
                 Token.TokenizeUnicode(&line_tok, body);
                 Lexeme.ParseTokens(&line_lex, line_tok.items);
                 Line.CtxParseMode(&line_ctx, line_lex.items, BUF_SIZE_TOK);
@@ -176,9 +183,6 @@ pub fn Formatter(
             }
         }
 
-        // FIXME: pathological lack of bounds checking and assuming that there will be a
-        //  next token or chunk
-        // TODO: take tokens as a slice?
         /// takes a token list representing a "normal" nasm source line, and writes out
         /// the formatted results to a buffer
         /// @tok    tokenized source line, in the format produced by Token-related code
@@ -310,12 +314,10 @@ test "Format" {
             \\
             \\mov eax,16; comment2
             ,
-            // FIXME: comment1 will be in wrong position after more advanced
-            //  comment formatting is implemented
             .ex =
             \\my_label:
             \\
-            \\                                        ; comment1
+            \\; comment1
             \\
             \\    mov     eax, 16                     ; comment2
             \\
