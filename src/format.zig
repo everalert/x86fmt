@@ -10,6 +10,7 @@ const Line = @import("line.zig");
 const BLAND = @import("util.zig").BLAND;
 const IBLAND = @import("util.zig").IBLAND;
 const BLOR = @import("util.zig").BLOR;
+const IBLXOR = @import("util.zig").IBLXOR;
 const PadSpaces = @import("util.zig").PadSpaces;
 
 pub const Error = error{SourceContainsBOM};
@@ -97,15 +98,15 @@ pub fn Formatter(
                     continue;
                 }
 
-                const b_crlf: bool, const body: []const u8, const comment: []const u8 = comgen: {
-                    var b_crlf = false;
+                const body: []const u8, const comment: []const u8 = comgen: {
                     var body_s = line_s[0..];
                     var com_s = line_s[line_s.len..];
 
-                    if (std.mem.endsWith(u8, body_s, "\r")) {
+                    const b_crlf = std.mem.endsWith(u8, body_s, "\r");
+                    if (b_crlf)
                         body_s = body_s[0 .. body_s.len - 1];
-                        b_crlf = true;
-                    }
+                    if (line_ctx.NewLineStr.len == 0)
+                        line_ctx.NewLineStr = "\r\n"[IBLXOR(true, b_crlf)..];
 
                     var scope: ?u8 = null;
                     var escaped = false;
@@ -134,21 +135,21 @@ pub fn Formatter(
                         }
                     }
 
-                    break :comgen .{ b_crlf, std.mem.trim(u8, body_s, "\t "), com_s };
+                    break :comgen .{ std.mem.trim(u8, body_s, "\t "), com_s };
                 };
 
                 // the irony of nested conditional branches immediately after branchless and
                 blank_lines = (blank_lines + 1) * IBLAND(body.len == 0, comment.len == 0);
                 if (blank_lines > 0) {
                     if (blank_lines <= settings.MaxBlankLines)
-                        _ = out.write(if (b_crlf) "\r\n" else "\n") catch unreachable; // FIXME: handle
+                        _ = out.write(line_ctx.NewLineStr) catch unreachable; // FIXME: handle
                     continue;
                 }
 
                 // TODO: smart comment positioning based on prev/next lines
                 if (BLAND(body.len == 0, comment.len > 0)) {
                     _ = out.write(comment) catch unreachable; // FIXME: handle
-                    _ = out.write("\n") catch unreachable; // FIXME: handle
+                    _ = out.write(line_ctx.NewLineStr) catch unreachable; // FIXME: handle
                     continue;
                 }
 
@@ -157,8 +158,9 @@ pub fn Formatter(
                 Line.CtxParseMode(&line_ctx, line_lex.items, BUF_SIZE_TOK);
                 Line.CtxUpdateSection(&line_ctx, line_lex.items, &settings, BUF_SIZE_TOK);
 
-                // FIXME: give this real logic lol
-                // TODO: special case formatting for 'primitive'-type assembly directives
+                // FIXME: give this real logic lol, generic formatter currently
+                //  doesn't respect section indent settings etc.
+                // FIXME: source line label also ignores such settings
                 switch (line_ctx.Mode) {
                     .AsmDirective,
                     .PreProcDirective,
@@ -179,7 +181,7 @@ pub fn Formatter(
 
                 _ = out.write(line.items) catch unreachable; // FIXME: handle
                 // FIXME: branchless (also at the other spot)
-                _ = out.write(if (b_crlf) "\r\n" else "\n") catch unreachable; // FIXME: handle
+                _ = out.write(line_ctx.NewLineStr) catch unreachable; // FIXME: handle
             }
         }
 
@@ -292,7 +294,7 @@ test "Format" {
         },
         .{ // multiline with crlf break
             .in = "  my_label:\r\nmov eax,16; comment",
-            .ex = "my_label:\r\n    mov     eax, 16                     ; comment\n",
+            .ex = "my_label:\r\n    mov     eax, 16                     ; comment\r\n",
         },
         .{ // double multiline
             .in = "  my_label:\n\nmov eax,16; comment",
@@ -300,7 +302,7 @@ test "Format" {
         },
         .{ // double multiline crlf
             .in = "  my_label:\r\n\r\nmov eax,16; comment",
-            .ex = "my_label:\r\n\r\n    mov     eax, 16                     ; comment\n",
+            .ex = "my_label:\r\n\r\n    mov     eax, 16                     ; comment\r\n",
         },
         .{ // 3 blank lines -> fold to 2
             .in = "  my_label:\n\n\n\nmov eax,16; comment",
@@ -379,7 +381,6 @@ test "Format" {
     };
 
     std.testing.log_level = .debug;
-    const fmt = Formatter(BUF_SIZE_LINE_IO, BUF_SIZE_LINE_TOK, BUF_SIZE_LINE_LEX, BUF_SIZE_TOK);
     for (test_cases, 0..) |t, i| {
         errdefer std.debug.print("FAILED {d:0>2}\n\n", .{i});
 
@@ -387,6 +388,7 @@ test "Format" {
         var output = std.ArrayList(u8).init(std.testing.allocator);
         defer output.deinit();
 
+        const fmt = Formatter(BUF_SIZE_LINE_IO, BUF_SIZE_LINE_TOK, BUF_SIZE_LINE_LEX, BUF_SIZE_TOK);
         const f = fmt.Format(input.reader(), output.writer(), .{});
 
         if (t.err) |ex_err| {

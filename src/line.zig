@@ -22,6 +22,7 @@ pub const Context = struct {
     ColOps: usize, // column: operands
     ColLabIns: usize, // column: instruction (with label present)
     ColLabOps: usize, // column: operands (with label present)
+    NewLineStr: []const u8,
 };
 
 // NOTE: assembler directives: 'primitive' directives enclosed in square brackets,
