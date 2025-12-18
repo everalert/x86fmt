@@ -124,9 +124,7 @@ pub fn Parse(alloc: Allocator) !CLI {
 
     if (i_kind == null) i_kind = .Console;
     if (o_kind == null) o_kind = i_kind;
-    // FIXME: need to check here if a provided output file matches the input file
-    //  since that would also cause the same file overwrite bug
-    if (o_kind == .File and o_file.len == 0) {
+    if (o_kind == .File and (o_file.len == 0 or eql(u8, i_file, o_file))) {
         o_file = try std.fmt.allocPrintZ(alloc, "{s}.tmp", .{i_file});
         b_io_file_same = true;
     }
