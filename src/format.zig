@@ -15,36 +15,36 @@ const PadSpaces = @import("util.zig").PadSpaces;
 pub const Error = error{SourceContainsBOM};
 
 pub const Settings = struct {
-    TabSize: usize,
+    TabSize: usize = 4,
 
     /// Maximum number of consecutive blank lines; large gaps will be folded to
     /// this number. Lines with comments do not count toward blanks.
-    MaxBlankLines: usize,
+    MaxBlankLines: usize = 2,
 
     /// Comment column, when line is not a standalone comment.
-    ComCol: usize,
+    ComCol: usize = 40,
 
     /// Columns between start of label and instruction, rounded up to next multiple
     /// of TabSize. Lines without a label will ignore this setting and inset the
     /// instruction by TabSize.
-    InsMinGap: usize,
+    InsMinGap: usize = 12,
 
     /// Columns between start of instruction and start of operands, rounded up to
     /// the next multiple of TabSize.
-    OpsMinGap: usize,
+    OpsMinGap: usize = 8,
 
     /// Alternate values for ComCol, InsMinGap and OpsMinGap, used only in the
     /// data-type section context (e.g. ".data", ".bss", ".tls").
-    DataComCol: usize,
-    DataInsMinGap: usize,
-    DataOpsMinGap: usize,
+    DataComCol: usize = 64,
+    DataInsMinGap: usize = 16,
+    DataOpsMinGap: usize = 32,
 
     /// Base indentation for different section contexts (e.g. "section .data").
     /// Other offsets are added to these depending on the section type.
-    SectionIndentNone: usize,
-    SectionIndentData: usize,
-    SectionIndentText: usize,
-    SectionIndentOther: usize,
+    SectionIndentNone: usize = 0,
+    SectionIndentData: usize = 0,
+    SectionIndentText: usize = 0,
+    SectionIndentOther: usize = 0,
 };
 
 pub fn Formatter(
@@ -73,14 +73,10 @@ pub fn Formatter(
             var line_tok = std.ArrayListUnmanaged(Token).initBuffer(&TokBufLine);
             var line_lex = std.ArrayListUnmanaged(Lexeme).initBuffer(&LexBufLine);
 
-            var line_ctx: Line.Context = .{
-                .Section = .None,
-                .ColCom = settings.ComCol,
-                .ColIns = settings.TabSize,
-                .ColOps = settings.TabSize + settings.OpsMinGap,
-                .ColLabIns = settings.InsMinGap,
-                .ColLabOps = settings.InsMinGap + settings.OpsMinGap,
-            };
+            var line_ctx = std.mem.zeroes(Line.Context);
+            line_ctx.Mode = .Blank;
+            line_ctx.Section = .None;
+            Line.CtxUpdateColumns(&line_ctx, &settings);
 
             var blank_lines: usize = 0;
             var line_i: usize = 0;
@@ -151,13 +147,18 @@ pub fn Formatter(
 
                 Token.TokenizeUnicode(&line_tok, body);
                 Lexeme.ParseTokens(&line_lex, line_tok.items);
-                const line_mode = Line.ParseMode(line_lex.items, &line_ctx);
+                Line.CtxParseMode(&line_ctx, line_lex.items, BUF_SIZE_TOK);
+                Line.CtxUpdateSection(&line_ctx, line_lex.items, &settings, BUF_SIZE_TOK);
 
                 // FIXME: give this real logic lol
                 // TODO: special case formatting for 'primitive'-type assembly directives
-                switch (line_mode) {
-                    .AsmDirective, .PreProcDirective, .Macro => FormatGenericDirectiveLine(&line, line_lex.items),
-                    .Source => FormatSourceLine(&line, line_lex.items, &line_ctx),
+                switch (line_ctx.Mode) {
+                    .AsmDirective,
+                    .PreProcDirective,
+                    .Macro,
+                    => FormatGenericDirectiveLine(&line, line_lex.items),
+                    .Source,
+                    => FormatSourceLine(&line, line_lex.items, &line_ctx),
                     else => {},
                 }
 
@@ -170,6 +171,7 @@ pub fn Formatter(
                 }
 
                 _ = out.write(line.items) catch unreachable; // FIXME: handle
+                // FIXME: branchless (also at the other spot)
                 _ = out.write(if (b_crlf) "\r\n" else "\n") catch unreachable; // FIXME: handle
             }
         }
@@ -328,8 +330,15 @@ test "Format" {
             .ex = "[section .text]\n",
         },
         .{ // section data
-            .in = "section  .rodata",
-            .ex = "section .rodata\n",
+            .in =
+            \\section .rodata
+            \\strloc_errmsg_format_err equ 9 ; start of error code
+            ,
+            .ex =
+            \\section .rodata
+            \\    strloc_errmsg_format_err        equ 9                       ; start of error code
+            \\
+            ,
         },
         .{ // section other
             .in = "section  whatever",
@@ -376,20 +385,7 @@ test "Format" {
         var output = std.ArrayList(u8).init(std.testing.allocator);
         defer output.deinit();
 
-        const f = fmt.Format(input.reader(), output.writer(), .{
-            .TabSize = 4,
-            .MaxBlankLines = 2,
-            .ComCol = 40,
-            .InsMinGap = 12,
-            .OpsMinGap = 8,
-            .DataComCol = 64,
-            .DataInsMinGap = 16,
-            .DataOpsMinGap = 24,
-            .SectionIndentNone = 0,
-            .SectionIndentData = 0,
-            .SectionIndentText = 0,
-            .SectionIndentOther = 0,
-        });
+        const f = fmt.Format(input.reader(), output.writer(), .{});
 
         if (t.err) |ex_err| {
             try std.testing.expectError(ex_err, f);

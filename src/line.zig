@@ -3,6 +3,7 @@ const Line = @This();
 const std = @import("std");
 const assert = std.debug.assert;
 
+const FormatSettings = @import("format.zig").Settings;
 const Lexeme = @import("lexeme.zig");
 const Token = @import("token.zig");
 const BLOR = @import("util.zig").BLOR;
@@ -11,8 +12,11 @@ pub const State = enum { Label, Instruction, Operands, Comment };
 
 pub const Mode = enum { Blank, Unknown, Comment, Source, Macro, AsmDirective, PreProcDirective };
 
+// FIXME: should the line buffers be ref'd here?
 pub const Context = struct {
+    Mode: Mode,
     Section: SectionKind,
+    ColLab: usize, // column: label
     ColCom: usize, // column: comment
     ColIns: usize, // column: instruction
     ColOps: usize, // column: operands
@@ -41,15 +45,20 @@ const SectionKind = enum { None, Text, Data, Other };
 const SectionDataSuffixes = [_][]const u8{ "bss", "data", "tls" }; // also: data1, tls$
 const SectionTextSuffixes = [_][]const u8{"text"}; // yep
 
-// FIXME: case_buf size matching comptime setting BUF_SIZE_TOK
-pub fn ParseMode(lex: []const Lexeme, ctx: *Context) Mode {
-    if (lex.len == 0)
-        return .Blank;
+pub fn CtxParseMode(
+    ctx: *Context,
+    lex: []const Lexeme,
+    comptime BUF_SIZE_TOK: usize,
+) void {
+    if (lex.len == 0) {
+        ctx.Mode = .Blank;
+        return;
+    }
 
-    var case_buf: [64]u8 = undefined;
+    var case_buf: [BUF_SIZE_TOK]u8 = undefined;
 
     const tok = &lex[0].data[0];
-    const mode: Mode = switch (tok.kind) {
+    ctx.Mode = switch (tok.kind) {
         .String => str: {
             const lowercase = std.ascii.lowerString(&case_buf, tok.data);
 
@@ -73,42 +82,78 @@ pub fn ParseMode(lex: []const Lexeme, ctx: *Context) Mode {
         .Whitespace => unreachable, // token sequence should be pre-stripped
         else => .Unknown,
     };
+}
+
+pub fn CtxUpdateSection(
+    ctx: *Context,
+    lex: []const Lexeme,
+    fmt: *const FormatSettings,
+    comptime BUF_SIZE_TOK: usize,
+) void {
+    if (ctx.Mode != .AsmDirective) return;
+    var case_buf: [BUF_SIZE_TOK]u8 = undefined;
 
     // detect section context
-    if (mode == .AsmDirective) sec: {
-        const tok1, const tok2 = tokens: {
-            const d1 = lex[0].data;
-            if (d1[0].kind == .Scope) {
-                if (d1.len < 3 or
-                    BLOR(d1[1].kind != .String, d1[2].kind != .String))
-                    break :sec;
-                break :tokens .{ &d1[1], &d1[2] };
-            }
-            const d2 = lex[1].data;
-            if (lex.len < 2) break :sec;
-            if (lex.len < 2 or
-                BLOR(d1[0].kind != .String, d2[0].kind != .String))
-                break :sec;
-            break :tokens .{ &d1[0], &d2[0] };
-        };
-
-        const directive = std.ascii.lowerString(&case_buf, tok1.data);
-        if (!std.mem.eql(u8, directive, "section")) break :sec;
-
-        const section = std.ascii.lowerString(&case_buf, tok2.data);
-        if (!std.mem.startsWith(u8, section, ".")) {
-            ctx.Section = .Other;
-            break :sec;
+    const tok1, const tok2 = tokens: {
+        const d1 = lex[0].data;
+        if (d1[0].kind == .Scope) {
+            if (d1.len < 3 or
+                BLOR(d1[1].kind != .String, d1[2].kind != .String))
+                return;
+            break :tokens .{ &d1[1], &d1[2] };
         }
-        for (SectionTextSuffixes) |suf| if (std.mem.endsWith(u8, section, suf)) {
-            ctx.Section = .Text;
-            break :sec;
-        };
-        for (SectionDataSuffixes) |suf| if (std.mem.endsWith(u8, section, suf)) {
-            ctx.Section = .Data;
-            break :sec;
-        };
-    }
+        const d2 = lex[1].data;
+        if (lex.len < 2) return;
+        if (lex.len < 2 or
+            BLOR(d1[0].kind != .String, d2[0].kind != .String))
+            return;
+        break :tokens .{ &d1[0], &d2[0] };
+    };
 
-    return mode;
+    const directive = std.ascii.lowerString(&case_buf, tok1.data);
+    if (!std.mem.eql(u8, directive, "section")) return;
+
+    defer CtxUpdateColumns(ctx, fmt);
+
+    const section = std.ascii.lowerString(&case_buf, tok2.data);
+    if (!std.mem.startsWith(u8, section, ".")) {
+        ctx.Section = .Other;
+        return;
+    }
+    for (SectionTextSuffixes) |suf| if (std.mem.endsWith(u8, section, suf)) {
+        ctx.Section = .Text;
+        return;
+    };
+    for (SectionDataSuffixes) |suf| if (std.mem.endsWith(u8, section, suf)) {
+        ctx.Section = .Data;
+        return;
+    };
+}
+
+pub fn CtxUpdateColumns(ctx: *Context, fmt: *const FormatSettings) void {
+    switch (ctx.Section) {
+        .Data => {
+            const base = fmt.SectionIndentData;
+            ctx.ColLab = base;
+            ctx.ColCom = fmt.DataComCol;
+            ctx.ColIns = base + fmt.TabSize;
+            ctx.ColOps = base + fmt.TabSize + fmt.DataOpsMinGap;
+            ctx.ColLabIns = base + fmt.DataInsMinGap;
+            ctx.ColLabOps = base + fmt.DataInsMinGap + fmt.DataOpsMinGap;
+        },
+        else => |s| {
+            const base = switch (s) {
+                .None => fmt.SectionIndentNone,
+                .Text => fmt.SectionIndentText,
+                .Other => fmt.SectionIndentOther,
+                else => unreachable,
+            };
+            ctx.ColLab = base;
+            ctx.ColCom = fmt.ComCol;
+            ctx.ColIns = base + fmt.TabSize;
+            ctx.ColOps = base + fmt.TabSize + fmt.OpsMinGap;
+            ctx.ColLabIns = base + fmt.InsMinGap;
+            ctx.ColLabOps = base + fmt.InsMinGap + fmt.OpsMinGap;
+        },
+    }
 }

@@ -21,7 +21,7 @@
 //!     -omg <num>, --operands-min-gap <num>            default 8
 //!     -dcc <num>, --data-comment-col <num>            default 64
 //!     -dimg <num>, --data-instruction-min-gap <num>   default 16
-//!     -domg <num>, --data-operands-min-gap <num>      default 24
+//!     -domg <num>, --data-operands-min-gap <num>      default 32
 //!     -sin <num>, --section-indent-none <num>         default 0
 //!     -sid <num>, --section-indent-data <num>         default 0
 //!     -sit <num>, --section-indent-text <num>         default 0
@@ -70,20 +70,7 @@ pub fn Parse(alloc: Allocator) !CLI {
     var o_file: []const u8 = &[_]u8{};
     var b_show_help = false;
     var b_io_file_same = false;
-    var fmt = FormatSettings{
-        .TabSize = 4, // -ts, --tab-size
-        .MaxBlankLines = 2, // -mbl --max-blank-lines
-        .ComCol = 40, // -cc --comment-col
-        .InsMinGap = 12, // -img --instruction-min-gap
-        .OpsMinGap = 8, // -omg --operands-min-gap
-        .DataComCol = 64, // -dcc --data-comment-col
-        .DataInsMinGap = 16, // -dimg --data-instruction-min-gap
-        .DataOpsMinGap = 24, // -domg --data-operands-min-gap
-        .SectionIndentNone = 0, // -sin, --section-indent-none
-        .SectionIndentData = 0, // -sid, --section-indent-data
-        .SectionIndentText = 0, // -sit, --section-indent-text
-        .SectionIndentOther = 0, // -sio, --section-indent-other
-    };
+    var fmt = FormatSettings{};
 
     var args = try std.process.argsWithAllocator(alloc);
     defer args.deinit();
