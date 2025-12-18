@@ -1,4 +1,7 @@
 const std = @import("std");
+const assert = std.debug.assert;
+
+// BRANCHLESS
 
 /// Branchless AND -> int
 pub inline fn IBLAND(b1: bool, b2: bool) usize {
@@ -30,9 +33,23 @@ pub inline fn BLXOR(b1: bool, b2: bool) bool {
     return IBLXOR(b1, b2) > 0;
 }
 
-/// Add spaces up to given column, adding a minimum of 1 space for padding
-pub fn PadSpaces(out: *std.ArrayListUnmanaged(u8), col: *usize, until: usize) void {
-    const n: usize = @max(1, until -| col.*);
-    out.appendNTimesAssumeCapacity(32, n);
+/// Branchless switch on bool -> int
+pub inline fn BLSEL(b: bool, comptime T: type, n1: T, n2: T) T {
+    comptime assert(@typeInfo(T) == .Int);
+    return @intFromBool(b) * n1 + @intFromBool(!b) * n2;
+}
+
+/// Branchless switch on bool -> enum
+pub inline fn BLSELE(b: bool, comptime T: type, v1: T, v2: T) T {
+    comptime assert(@typeInfo(T) == .Enum);
+    return @enumFromInt(@intFromBool(b) * @intFromEnum(v1) + @intFromBool(!b) * @intFromEnum(v2));
+}
+
+// PADDING
+
+/// Add spaces up to given column, adding at least a given minimum number of spaces
+pub fn PadSpaces(out: *std.ArrayListUnmanaged(u8), col: *usize, until: usize, min: usize) void {
+    const n: usize = @max(min, until -| col.*);
+    out.appendNTimesAssumeCapacity(' ', n);
     col.* += n;
 }

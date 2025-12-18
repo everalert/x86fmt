@@ -7,6 +7,7 @@ const FormatSettings = @import("format.zig").Settings;
 const Lexeme = @import("lexeme.zig");
 const Token = @import("token.zig");
 const BLOR = @import("util.zig").BLOR;
+const BLSELE = @import("util.zig").BLSELE;
 
 pub const State = enum { Label, Instruction, Operands, Comment };
 
@@ -79,7 +80,7 @@ pub fn CtxParseMode(
 
             break :str .Source;
         },
-        .Scope => if (tok.data[0] == '[') .AsmDirective else .Unknown,
+        .Scope => BLSELE(tok.data[0] == '[', Mode, .AsmDirective, .Unknown),
         .Whitespace => unreachable, // token sequence should be pre-stripped
         else => .Unknown,
     };

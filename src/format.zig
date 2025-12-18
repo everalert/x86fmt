@@ -11,6 +11,8 @@ const BLAND = @import("util.zig").BLAND;
 const IBLAND = @import("util.zig").IBLAND;
 const BLOR = @import("util.zig").BLOR;
 const IBLXOR = @import("util.zig").IBLXOR;
+const BLSEL = @import("util.zig").BLSEL;
+const BLSELE = @import("util.zig").BLSELE;
 const PadSpaces = @import("util.zig").PadSpaces;
 
 pub const Error = error{SourceContainsBOM};
@@ -165,7 +167,7 @@ pub fn Formatter(
                     .AsmDirective,
                     .PreProcDirective,
                     .Macro,
-                    => FormatGenericDirectiveLine(&line, line_lex.items),
+                    => FormatGenericDirectiveLine(&line, line_lex.items, &line_ctx),
                     .Source,
                     => FormatSourceLine(&line, line_lex.items, &line_ctx),
                     else => {},
@@ -203,23 +205,19 @@ pub fn Formatter(
                     .Label => ls: {
                         const t_len = lex[0].data[0].data.len;
                         b_label = lex[0].data[0].data[t_len - 1] == ':';
-                        const next_s: Line.State = if (b_label) st: {
-                            break :st .Instruction;
-                        } else st: { // if not followed by ':', assume it's an instruction
-                            PadSpaces(out, &fmtgen_ci, ctx.ColIns);
-                            break :st .Operands;
-                        };
+                        PadSpaces(out, &fmtgen_ci, BLSEL(b_label, usize, ctx.ColLab, ctx.ColIns), 0);
+                        const next_s = BLSELE(b_label, Line.State, .Instruction, .Operands);
 
                         Lexeme.BufAppend(out, &lex[fmtgen_i], &fmtgen_i, &fmtgen_ci, BUF_SIZE_TOK);
                         break :ls next_s;
                     },
                     .Instruction => ls: {
-                        PadSpaces(out, &fmtgen_ci, if (b_label) ctx.ColLabIns else ctx.ColIns);
+                        PadSpaces(out, &fmtgen_ci, BLSEL(b_label, usize, ctx.ColLabIns, ctx.ColIns), 1);
                         Lexeme.BufAppend(out, &lex[fmtgen_i], &fmtgen_i, &fmtgen_ci, BUF_SIZE_TOK);
                         break :ls .Operands;
                     },
                     .Operands => ls: {
-                        PadSpaces(out, &fmtgen_ci, if (b_label) ctx.ColLabOps else ctx.ColOps);
+                        PadSpaces(out, &fmtgen_ci, BLSEL(b_label, usize, ctx.ColLabOps, ctx.ColOps), 1);
                         Lexeme.BufAppendSlice(out, lex[fmtgen_i..], &fmtgen_i, &fmtgen_ci, .{}, BUF_SIZE_TOK);
                         break :ls .Comment;
                     },
@@ -233,12 +231,14 @@ pub fn Formatter(
         fn FormatGenericDirectiveLine(
             out: *std.ArrayListUnmanaged(u8),
             lex: []const Lexeme,
+            ctx: *const Line.Context,
         ) void {
             var fmtgen_i: usize = 0;
             var fmtgen_ci: usize = 0;
+            PadSpaces(out, &fmtgen_ci, ctx.ColLab, 0);
             Lexeme.BufAppendOpts(out, &lex[0], &fmtgen_i, &fmtgen_ci, .{ .bHeadToLower = true }, BUF_SIZE_TOK);
             if (lex.len > 1) {
-                PadSpaces(out, &fmtgen_ci, fmtgen_ci);
+                PadSpaces(out, &fmtgen_ci, fmtgen_ci, 1);
                 Lexeme.BufAppendSlice(out, lex[1..], &fmtgen_i, &fmtgen_ci, .{}, BUF_SIZE_TOK);
             }
         }

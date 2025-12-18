@@ -139,7 +139,7 @@ pub fn BufAppendSlice(
     var prev_kind: Lexeme.Kind = .None;
     for (lexemes, 0..) |*lex, li| {
         if (BLAND(li > 0, BLAND(lex.kind != .Separator, prev_kind != .Separator)))
-            PadSpaces(out, ci, i.*);
+            PadSpaces(out, ci, i.*, 1);
         BufAppendOpts(out, lex, i, ci, opts, BUF_SIZE_TOK);
         prev_kind = lex.kind;
     }
