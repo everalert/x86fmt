@@ -14,11 +14,18 @@
 //!     -fo <file>          output mode = File, writing to <file>
 //!     -co                 output mode = Console (stdout)
 //!     -h, --help          display help information (not yet written)
-//!     -ts <num>,  --tab-size <num>                default 4
-//!     -cc <num>,  --comment-col <num>             default 40
-//!     -img <num>, --instruction-min-gap <num>     default 12
-//!     -omg <num>, --operands-min-gap <num>        default 8
-//!     -mbl <num>, --max-blank-lines <num>         default 2
+//!     -ts <num>,  --tab-size <num>                    default 4
+//!     -mbl <num>, --max-blank-lines <num>             default 2
+//!     -cc <num>,  --comment-col <num>                 default 40
+//!     -img <num>, --instruction-min-gap <num>         default 12
+//!     -omg <num>, --operands-min-gap <num>            default 8
+//!     -dcc <num>, --data-comment-col <num>            default 64
+//!     -dimg <num>, --data-instruction-min-gap <num>   default 16
+//!     -domg <num>, --data-operands-min-gap <num>      default 24
+//!     -sin <num>, --section-indent-none <num>         default 0
+//!     -sid <num>, --section-indent-data <num>         default 0
+//!     -sit <num>, --section-indent-text <num>         default 0
+//!     -sio <num>, --section-indent-other <num>        default 0
 //!
 //! Sample usage:
 //!     x86fmt (none)                       input: <stdin>    output: <stdout>
@@ -65,23 +72,37 @@ pub fn Parse(alloc: Allocator) !CLI {
     var b_io_file_same = false;
     var fmt = FormatSettings{
         .TabSize = 4, // -ts, --tab-size
+        .MaxBlankLines = 2, // -mbl --max-blank-lines
         .ComCol = 40, // -cc --comment-col
         .InsMinGap = 12, // -img --instruction-min-gap
         .OpsMinGap = 8, // -omg --operands-min-gap
-        .MaxBlankLines = 2, // -mbl --max-blank-lines
+        .DataComCol = 64, // -dcc --data-comment-col
+        .DataInsMinGap = 16, // -dimg --data-instruction-min-gap
+        .DataOpsMinGap = 24, // -domg --data-operands-min-gap
+        .SectionIndentNone = 0, // -sin, --section-indent-none
+        .SectionIndentData = 0, // -sid, --section-indent-data
+        .SectionIndentText = 0, // -sit, --section-indent-text
+        .SectionIndentOther = 0, // -sio, --section-indent-other
     };
 
     var args = try std.process.argsWithAllocator(alloc);
     defer args.deinit();
 
-    var b_fo_waiter = false;
     var b_ts_waiter = false;
+    var b_mbl_waiter = false;
     var b_cc_waiter = false;
     var b_img_waiter = false;
     var b_omg_waiter = false;
-    var b_mbl_waiter = false;
-    var b_first_skipped = false;
+    var b_dcc_waiter = false;
+    var b_dimg_waiter = false;
+    var b_domg_waiter = false;
+    var b_sin_waiter = false;
+    var b_sid_waiter = false;
+    var b_sit_waiter = false;
+    var b_sio_waiter = false;
+    var b_fo_waiter = false;
 
+    var b_first_skipped = false;
     while (args.next()) |arg| {
         if (!b_first_skipped) {
             b_first_skipped = true;
@@ -90,6 +111,9 @@ pub fn Parse(alloc: Allocator) !CLI {
 
         const ts = RawCheck(arg, &.{ "-ts", "--tab-size" });
         if (StageTwoCheck(alloc, arg, ts, usize, &fmt.TabSize, &b_ts_waiter))
+            continue;
+        const mbl = RawCheck(arg, &.{ "-mbl", "--max-blank-lines" });
+        if (StageTwoCheck(alloc, arg, mbl, usize, &fmt.MaxBlankLines, &b_mbl_waiter))
             continue;
         const cc = RawCheck(arg, &.{ "-cc", "--comment-column" });
         if (StageTwoCheck(alloc, arg, cc, usize, &fmt.ComCol, &b_cc_waiter))
@@ -100,8 +124,26 @@ pub fn Parse(alloc: Allocator) !CLI {
         const omg = RawCheck(arg, &.{ "-omg", "--operands-min-gap" });
         if (StageTwoCheck(alloc, arg, omg, usize, &fmt.OpsMinGap, &b_omg_waiter))
             continue;
-        const mbl = RawCheck(arg, &.{ "-mbl", "--max-blank-lines" });
-        if (StageTwoCheck(alloc, arg, mbl, usize, &fmt.MaxBlankLines, &b_mbl_waiter))
+        const dcc = RawCheck(arg, &.{ "-dcc", "--data-comment-column" });
+        if (StageTwoCheck(alloc, arg, dcc, usize, &fmt.DataComCol, &b_dcc_waiter))
+            continue;
+        const dimg = RawCheck(arg, &.{ "-dimg", "--data-instruction-min-gap" });
+        if (StageTwoCheck(alloc, arg, dimg, usize, &fmt.DataInsMinGap, &b_dimg_waiter))
+            continue;
+        const domg = RawCheck(arg, &.{ "-domg", "--data-operands-min-gap" });
+        if (StageTwoCheck(alloc, arg, domg, usize, &fmt.DataOpsMinGap, &b_domg_waiter))
+            continue;
+        const sin = RawCheck(arg, &.{ "-sin", "--section-indent-none" });
+        if (StageTwoCheck(alloc, arg, sin, usize, &fmt.SectionIndentNone, &b_sin_waiter))
+            continue;
+        const sid = RawCheck(arg, &.{ "-sid", "--section-indent-data" });
+        if (StageTwoCheck(alloc, arg, sid, usize, &fmt.SectionIndentData, &b_sid_waiter))
+            continue;
+        const sit = RawCheck(arg, &.{ "-sit", "--section-indent-text" });
+        if (StageTwoCheck(alloc, arg, sit, usize, &fmt.SectionIndentText, &b_sit_waiter))
+            continue;
+        const sio = RawCheck(arg, &.{ "-sio", "--section-indent-other" });
+        if (StageTwoCheck(alloc, arg, sio, usize, &fmt.SectionIndentOther, &b_sio_waiter))
             continue;
 
         const fo = EnumCheckOnce(arg, &.{"-fo"}, IOKind, .File, &o_kind);

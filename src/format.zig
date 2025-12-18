@@ -16,18 +16,35 @@ pub const Error = error{SourceContainsBOM};
 
 pub const Settings = struct {
     TabSize: usize,
+
+    /// Maximum number of consecutive blank lines; large gaps will be folded to
+    /// this number. Lines with comments do not count toward blanks.
+    MaxBlankLines: usize,
+
     /// Comment column, when line is not a standalone comment.
     ComCol: usize,
+
     /// Columns between start of label and instruction, rounded up to next multiple
     /// of TabSize. Lines without a label will ignore this setting and inset the
     /// instruction by TabSize.
     InsMinGap: usize,
+
     /// Columns between start of instruction and start of operands, rounded up to
     /// the next multiple of TabSize.
     OpsMinGap: usize,
-    /// Maximum number of consecutive blank lines; large gaps will be folded to
-    /// this number. Lines with comments do not count toward blanks.
-    MaxBlankLines: usize,
+
+    /// Alternate values for ComCol, InsMinGap and OpsMinGap, used only in the
+    /// data-type section context (e.g. ".data", ".bss", ".tls").
+    DataComCol: usize,
+    DataInsMinGap: usize,
+    DataOpsMinGap: usize,
+
+    /// Base indentation for different section contexts (e.g. "section .data").
+    /// Other offsets are added to these depending on the section type.
+    SectionIndentNone: usize,
+    SectionIndentData: usize,
+    SectionIndentText: usize,
+    SectionIndentOther: usize,
 };
 
 pub fn Formatter(
@@ -361,10 +378,17 @@ test "Format" {
 
         const f = fmt.Format(input.reader(), output.writer(), .{
             .TabSize = 4,
+            .MaxBlankLines = 2,
             .ComCol = 40,
             .InsMinGap = 12,
             .OpsMinGap = 8,
-            .MaxBlankLines = 2,
+            .DataComCol = 64,
+            .DataInsMinGap = 16,
+            .DataOpsMinGap = 24,
+            .SectionIndentNone = 0,
+            .SectionIndentData = 0,
+            .SectionIndentText = 0,
+            .SectionIndentOther = 0,
         });
 
         if (t.err) |ex_err| {
