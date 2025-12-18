@@ -56,7 +56,8 @@ pub fn Formatter(
             var line_tok = std.ArrayListUnmanaged(Token).initBuffer(&TokBufLine);
             var line_lex = std.ArrayListUnmanaged(Lexeme).initBuffer(&LexBufLine);
 
-            const line_ctx: Line.Context = .{
+            var line_ctx: Line.Context = .{
+                .Section = .None,
                 .ColCom = settings.ComCol,
                 .ColIns = settings.TabSize,
                 .ColOps = settings.TabSize + settings.OpsMinGap,
@@ -133,7 +134,7 @@ pub fn Formatter(
 
                 Token.TokenizeUnicode(&line_tok, body);
                 Lexeme.ParseTokens(&line_lex, line_tok.items);
-                const line_mode = Line.ParseMode(line_tok.items);
+                const line_mode = Line.ParseMode(line_lex.items, &line_ctx);
 
                 // FIXME: give this real logic lol
                 // TODO: special case formatting for 'primitive'-type assembly directives
@@ -305,9 +306,17 @@ test "Format" {
             .in = "extern _SomeFunctionName@12",
             .ex = "extern _SomeFunctionName@12\n",
         },
-        .{ // primitive assembler directive
+        .{ // section text, primitive assembler directive
             .in = " [ section  .text ] ",
             .ex = "[section .text]\n",
+        },
+        .{ // section data
+            .in = "section  .rodata",
+            .ex = "section .rodata\n",
+        },
+        .{ // section other
+            .in = "section  whatever",
+            .ex = "section whatever\n",
         },
         .{ // %macro (case-insensitive)
             .in = "%mACRO CoolMacro 2",
