@@ -25,27 +25,29 @@ pub fn main() !void {
         return;
     }
 
-    const fi = switch (cli.IKind) {
-        .File => try std.fs.cwd().openFile(cli.IFile, .{}),
-        .Console => c: {
-            const c = std.io.getStdIn();
-            if (!cli.bAllowTty and c.isTty()) return;
-            break :c c;
-        },
-    };
-    const fo = switch (cli.OKind) {
-        .File => try std.fs.cwd().createFile(cli.OFile, .{}),
-        .Console => std.io.getStdOut(),
-    };
-    var br = std.io.bufferedReader(fi.reader());
-    var bw = std.io.bufferedWriter(fo.writer());
+    {
+        const fi = switch (cli.IKind) {
+            .File => try std.fs.cwd().openFile(cli.IFile, .{}),
+            .Console => c: {
+                const c = std.io.getStdIn();
+                if (!cli.bAllowTty and c.isTty()) return;
+                break :c c;
+            },
+        };
+        defer fi.close();
+        var br = std.io.bufferedReader(fi.reader());
 
-    const fmt = Formatter(BUF_SIZE_LINE_IO, BUF_SIZE_LINE_TOK, BUF_SIZE_LINE_LEX, BUF_SIZE_TOK);
-    try fmt.Format(br.reader(), bw.writer(), cli.FmtSettings); // FIXME: handle
+        const fo = switch (cli.OKind) {
+            .File => try std.fs.cwd().createFile(cli.OFile, .{}),
+            .Console => std.io.getStdOut(),
+        };
+        defer fo.close();
+        var bw = std.io.bufferedWriter(fo.writer());
+        defer bw.flush() catch unreachable; // FIXME: handle
 
-    bw.flush() catch unreachable; // FIXME: handle
-    fo.close();
-    fi.close();
+        const fmt = Formatter(BUF_SIZE_LINE_IO, BUF_SIZE_LINE_TOK, BUF_SIZE_LINE_LEX, BUF_SIZE_TOK);
+        try fmt.Format(br.reader(), bw.writer(), cli.FmtSettings); // FIXME: handle
+    }
 
     if (cli.bIOFileSame) {
         try std.fs.cwd().deleteFile(cli.IFile);

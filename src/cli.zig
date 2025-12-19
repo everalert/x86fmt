@@ -75,9 +75,6 @@ pub fn Parse(alloc: Allocator) !CLI {
     var b_io_file_same = false;
     var fmt = FormatSettings{};
 
-    var args = try std.process.argsWithAllocator(alloc);
-    defer args.deinit();
-
     var b_ts_waiter = false;
     var b_mbl_waiter = false;
     var b_cc_waiter = false;
@@ -92,13 +89,10 @@ pub fn Parse(alloc: Allocator) !CLI {
     var b_sio_waiter = false;
     var b_fo_waiter = false;
 
-    var b_first_skipped = false;
+    var args = try std.process.argsWithAllocator(alloc);
+    defer args.deinit();
+    _ = args.next();
     while (args.next()) |arg| {
-        if (!b_first_skipped) {
-            b_first_skipped = true;
-            continue;
-        }
-
         const ts = RawCheck(arg, &.{ "-ts", "--tab-size" });
         if (StageTwoCheck(alloc, arg, ts, usize, &fmt.TabSize, &b_ts_waiter))
             continue;
