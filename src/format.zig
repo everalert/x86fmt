@@ -160,9 +160,6 @@ pub fn Formatter(
                 Line.CtxParseMode(&line_ctx, line_lex.items, BUF_SIZE_TOK);
                 Line.CtxUpdateSection(&line_ctx, line_lex.items, &settings, BUF_SIZE_TOK);
 
-                // FIXME: give this real logic lol, generic formatter currently
-                //  doesn't respect section indent settings etc.
-                // FIXME: source line label also ignores such settings
                 switch (line_ctx.Mode) {
                     .AsmDirective,
                     .PreProcDirective,
@@ -182,7 +179,6 @@ pub fn Formatter(
                 }
 
                 _ = out.write(line.items) catch unreachable; // FIXME: handle
-                // FIXME: branchless (also at the other spot)
                 _ = out.write(line_ctx.NewLineStr) catch unreachable; // FIXME: handle
             }
         }

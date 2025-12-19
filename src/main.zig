@@ -27,7 +27,11 @@ pub fn main() !void {
 
     const fi = switch (cli.IKind) {
         .File => try std.fs.cwd().openFile(cli.IFile, .{}),
-        .Console => std.io.getStdIn(),
+        .Console => c: {
+            const c = std.io.getStdIn();
+            if (!cli.bAllowTty and c.isTty()) return;
+            break :c c;
+        },
     };
     const fo = switch (cli.OKind) {
         .File => try std.fs.cwd().createFile(cli.OFile, .{}),

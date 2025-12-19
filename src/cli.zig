@@ -13,7 +13,8 @@
 //!     <file>              input mode = File, reading from <file>
 //!     -fo <file>          output mode = File, writing to <file>
 //!     -co                 output mode = Console (stdout)
-//!     -h, --help          display help information (not yet written)
+//!     -h, --help          display help information // FIXME: not yet written
+//!     -tty, --allow-tty   accept console input for stdin (default off)
 //!     -ts <num>,  --tab-size <num>                    default 4
 //!     -mbl <num>, --max-blank-lines <num>             default 2
 //!     -cc <num>,  --comment-col <num>                 default 40
@@ -52,6 +53,7 @@ IKind: IOKind,
 OKind: IOKind,
 IFile: []const u8,
 OFile: []const u8,
+bAllowTty: bool,
 bShowHelp: bool,
 /// implies that IKind and OKind are both File. if true, OFile will match IFile
 /// but with ".tmp" appended; after formatting, the caller can simply delete
@@ -68,6 +70,7 @@ pub fn Parse(alloc: Allocator) !CLI {
     var o_kind: ?IOKind = null;
     var i_file: []const u8 = &[_]u8{};
     var o_file: []const u8 = &[_]u8{};
+    var b_allow_tty = false;
     var b_show_help = false;
     var b_io_file_same = false;
     var fmt = FormatSettings{};
@@ -139,6 +142,9 @@ pub fn Parse(alloc: Allocator) !CLI {
         if (EnumCheckOnce(arg, &.{"-co"}, IOKind, .Console, &o_kind))
             continue;
 
+        if (BoolCheckOnce(arg, &.{ "-tty", "--allow-tty" }, &b_allow_tty))
+            continue;
+
         if (BoolCheckOnce(arg, &.{ "-h", "--help" }, &b_show_help))
             break;
 
@@ -162,6 +168,7 @@ pub fn Parse(alloc: Allocator) !CLI {
     assert(o_kind != .File or o_file.len > 0);
     return CLI{
         .FmtSettings = fmt,
+        .bAllowTty = b_allow_tty,
         .bShowHelp = b_show_help,
         .bIOFileSame = b_io_file_same,
         .IKind = i_kind.?,
