@@ -288,8 +288,12 @@ test "Format" {
             \\
             ,
         },
+        .{ // label and colon without whitespace
+            .in = "my_label:mov eax,16",
+            .ex = "my_label:   mov     eax, 16\n",
+        },
         .{ // multiline with crlf break
-            .in = "  my_label:\r\nmov eax,16; comment",
+            .in = "my_label:\r\nmov eax,16; comment",
             .ex = "my_label:\r\n    mov     eax, 16                     ; comment\r\n",
         },
         .{ // double multiline

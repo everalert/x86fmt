@@ -14,6 +14,7 @@ pub fn TokenizeUnicode(out: *std.ArrayListUnmanaged(Token), text: []const u8) vo
     var tokgen_it = std.unicode.Utf8Iterator{ .bytes = text, .i = 0 };
     while (true) {
         const start_i = tokgen_it.i;
+        const c_sl = tokgen_it.peek(1);
         const c = tokgen_it.nextCodepoint() orelse break;
         var token: *Token = out.addOneAssumeCapacity();
         switch (c) {
@@ -49,7 +50,13 @@ pub fn TokenizeUnicode(out: *std.ArrayListUnmanaged(Token), text: []const u8) vo
             },
             else => {
                 token.kind = .String;
+                var this_sl = c_sl;
                 while (true) {
+                    // split on string-ending char
+                    const split_chars = ":";
+                    if (std.mem.indexOfScalar(u8, split_chars, this_sl[0]) != null) break;
+
+                    // split on token-starting char
                     const peek_s = tokgen_it.peek(1);
                     const peek_chars = ", \t([{}])\"'`\\";
                     if (BLOR(
@@ -57,7 +64,7 @@ pub fn TokenizeUnicode(out: *std.ArrayListUnmanaged(Token), text: []const u8) vo
                         (peek_s.len == 1 and std.mem.indexOfScalar(u8, peek_chars, peek_s[0]) != null),
                     )) break;
 
-                    _ = tokgen_it.nextCodepoint();
+                    this_sl = tokgen_it.nextCodepointSlice() orelse break;
                 }
                 token.data = text[start_i..tokgen_it.i];
             },
