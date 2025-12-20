@@ -7,12 +7,13 @@ const BLOR = @import("util.zig").BLOR;
 
 pub const Kind = enum(u8) { None, String, MathOp, Scope, Comma, Backslash, Whitespace };
 
-pub const TokenizeError = error{CapacityExceeded};
-
 kind: Kind = .None,
 data: []const u8 = &[_]u8{},
 
-pub fn TokenizeUnicode(out: *std.ArrayListUnmanaged(Token), text: []const u8) TokenizeError!void {
+pub fn TokenizeUnicode(
+    out: *std.ArrayListUnmanaged(Token),
+    text: []const u8,
+) error{CapacityExceeded}!void {
     var tokgen_it = std.unicode.Utf8Iterator{ .bytes = text, .i = 0 };
     while (true) {
         const start_i = tokgen_it.i;

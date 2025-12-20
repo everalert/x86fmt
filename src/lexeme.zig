@@ -25,11 +25,16 @@ const ScopeEscapable = [_]bool{ false, false, false, true, true, true };
 
 // keep the stream flat since this is just for visual grouping, but this is
 //  getting dangerously close to just generating an AST lol
-pub fn ParseTokens(out: *std.ArrayListUnmanaged(Lexeme), tok: []const Token) void {
+pub fn ParseTokens(
+    out: *std.ArrayListUnmanaged(Lexeme),
+    tok: []const Token,
+) error{CapacityExceeded}!void {
     var scope: ?u8 = null;
     var prev_token_kind: Token.Kind = .None;
     var start_i: usize = 0;
     for (tok, 0..) |t, i| {
+        if (out.items.len >= out.capacity) return error.CapacityExceeded;
+
         var emit_lexeme: ?Kind = null;
         defer prev_token_kind = t.kind;
         defer if (emit_lexeme) |k| {

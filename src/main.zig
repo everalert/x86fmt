@@ -7,7 +7,7 @@ const Formatter = @import("format.zig").Formatter;
 
 const BUF_SIZE_LINE_IO = 4095;
 const BUF_SIZE_LINE_TOK = 1024;
-const BUF_SIZE_LINE_LEX = 1024;
+const BUF_SIZE_LINE_LEX = 512;
 const BUF_SIZE_TOK = 256;
 
 var mem: [4096]u8 = undefined;

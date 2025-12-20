@@ -155,7 +155,7 @@ pub fn Formatter(
                 }
 
                 Token.TokenizeUnicode(&line_tok, body) catch break;
-                Lexeme.ParseTokens(&line_lex, line_tok.items);
+                Lexeme.ParseTokens(&line_lex, line_tok.items) catch break;
                 Line.CtxParseMode(&line_ctx, line_lex.items, BUF_SIZE_TOK);
                 Line.CtxUpdateSection(&line_ctx, line_lex.items, &settings, BUF_SIZE_TOK);
 
@@ -246,7 +246,7 @@ pub fn Formatter(
 test "Format" {
     const BUF_SIZE_LINE_IO = 4095;
     const BUF_SIZE_LINE_TOK = 1024;
-    const BUF_SIZE_LINE_LEX = 1024;
+    const BUF_SIZE_LINE_LEX = 512;
     const BUF_SIZE_TOK = 256;
 
     const fmt = Formatter(BUF_SIZE_LINE_IO, BUF_SIZE_LINE_TOK, BUF_SIZE_LINE_LEX, BUF_SIZE_TOK);
@@ -381,17 +381,28 @@ test "Format" {
             .in = "mov eax, 16\nmov ebp, 16 ; " ++ dummy32 ** 128,
             .ex = "    mov     eax, 16\n",
         },
+        // FIXME: one character short?
         .{ // long (max) line length (4095)
             .in = "mov eax, 16\nmov ebp, 16 ; " ++ dummy32 ** 127 ++ dummy1 ** 16,
             .ex = "    mov     eax, 16\n    mov     ebp, 16                     ; " ++ dummy32 ** 127 ++ dummy1 ** 16 ++ "\n",
         },
+        // line token buffer limits
         .{ // line length token buffer overrun (>1024)
-            .in = "mov eax, 16\nmov ebp, 16 " ++ " a" ** 1024,
+            .in = "mov eax, 16\nmov ebp, 16" ++ " [es:eax]" ** 256,
             .ex = "    mov     eax, 16\n",
         },
         .{ // long (max) line tokens (1024)
-            .in = "mov eax, 16\nmov ebp, 16" ++ " a" ** 1020,
-            .ex = "    mov     eax, 16\n    mov     ebp, 16" ++ " a" ** 1020 ++ "\n",
+            .in = "mov eax, 16\nmov ebp, 16" ++ " [es:eax]" ** 255,
+            .ex = "    mov     eax, 16\n    mov     ebp, 16" ++ " [es: eax]" ** 255 ++ "\n",
+        },
+        // line lexeme buffer limits
+        .{ // line length lexeme buffer overrun (>512)
+            .in = "mov eax, 16\nmov ebp, 16" ++ " a" ** 509,
+            .ex = "    mov     eax, 16\n",
+        },
+        .{ // long (max) line lexemes (512)
+            .in = "mov eax, 16\nmov ebp, 16" ++ " a" ** 508,
+            .ex = "    mov     eax, 16\n    mov     ebp, 16" ++ " a" ** 508 ++ "\n",
         },
     };
 
