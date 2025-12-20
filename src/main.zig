@@ -49,10 +49,8 @@ pub fn main() !void {
         try fmt.Format(br.reader(), bw.writer(), cli.FmtSettings); // FIXME: handle
     }
 
-    if (cli.bIOFileSame) {
-        try std.fs.cwd().deleteFile(cli.IFile);
+    if (cli.bIOFileSame)
         try std.fs.cwd().rename(cli.OFile, cli.IFile);
-    }
 }
 
 test {
