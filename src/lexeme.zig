@@ -108,6 +108,7 @@ pub fn BufAppendOpts(
             var t_kind_prev: Token.Kind = .None;
             var b_lower_emitted = false;
             for (lex.data) |t| {
+                assert(t.data.len <= BUF_SIZE_TOK);
                 defer t_kind_prev = t.kind;
 
                 if (BLAND(t.kind == .String, t.kind == t_kind_prev))

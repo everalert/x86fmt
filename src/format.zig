@@ -154,7 +154,7 @@ pub fn Formatter(
                     continue;
                 }
 
-                Token.TokenizeUnicode(&line_tok, body) catch break;
+                Token.TokenizeUnicode(&line_tok, body, BUF_SIZE_TOK) catch break;
                 Lexeme.ParseTokens(&line_lex, line_tok.items) catch break;
                 Line.CtxParseMode(&line_ctx, line_lex.items, BUF_SIZE_TOK);
                 Line.CtxUpdateSection(&line_ctx, line_lex.items, &settings, BUF_SIZE_TOK);
@@ -386,23 +386,34 @@ test "Format" {
             .in = "mov eax, 16\nmov ebp, 16 ; " ++ dummy32 ** 127 ++ dummy1 ** 16,
             .ex = "    mov     eax, 16\n    mov     ebp, 16                     ; " ++ dummy32 ** 127 ++ dummy1 ** 16 ++ "\n",
         },
-        // line token buffer limits
-        .{ // line length token buffer overrun (>1024)
+        // FIXME: really need to move these tests to the appropriate place; starting
+        // to clash a little
+        // line token buffer limits (1024)
+        .{ // line length token buffer overrun
             .in = "mov eax, 16\nmov ebp, 16" ++ " [es:eax]" ** 256,
             .ex = "    mov     eax, 16\n",
         },
-        .{ // long (max) line tokens (1024)
+        .{ // long (max) line tokens
             .in = "mov eax, 16\nmov ebp, 16" ++ " [es:eax]" ** 255,
             .ex = "    mov     eax, 16\n    mov     ebp, 16" ++ " [es: eax]" ** 255 ++ "\n",
         },
-        // line lexeme buffer limits
-        .{ // line length lexeme buffer overrun (>512)
+        // line lexeme buffer limits (512)
+        .{ // line length lexeme buffer overrun
             .in = "mov eax, 16\nmov ebp, 16" ++ " a" ** 509,
             .ex = "    mov     eax, 16\n",
         },
-        .{ // long (max) line lexemes (512)
+        .{ // long (max) line lexemes
             .in = "mov eax, 16\nmov ebp, 16" ++ " a" ** 508,
             .ex = "    mov     eax, 16\n    mov     ebp, 16" ++ " a" ** 508 ++ "\n",
+        },
+        // individual token size limits (256)
+        .{ // token size overrun
+            .in = "mov " ++ "A" ** 257,
+            .ex = "",
+        },
+        .{ // long token
+            .in = "mov " ++ "A" ** 256,
+            .ex = "    mov     " ++ "A" ** 256 ++ "\n",
         },
     };
 

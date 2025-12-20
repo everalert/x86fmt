@@ -13,7 +13,8 @@ data: []const u8 = &[_]u8{},
 pub fn TokenizeUnicode(
     out: *std.ArrayListUnmanaged(Token),
     text: []const u8,
-) error{CapacityExceeded}!void {
+    comptime BUF_SIZE_TOK: usize,
+) error{ CapacityExceeded, TokenSizeExceeded }!void {
     var tokgen_it = std.unicode.Utf8Iterator{ .bytes = text, .i = 0 };
     while (true) {
         const start_i = tokgen_it.i;
@@ -22,6 +23,7 @@ pub fn TokenizeUnicode(
 
         if (out.unusedCapacitySlice().len == 0) return error.CapacityExceeded;
         var token: *Token = out.addOneAssumeCapacity();
+        token.* = std.mem.zeroes(Token);
 
         switch (c) {
             ',' => {
@@ -53,6 +55,7 @@ pub fn TokenizeUnicode(
                     _ = tokgen_it.nextCodepoint();
                 }
                 _ = out.pop();
+                continue; // don't do post-switch checks, because there is nothing to check
             },
             else => {
                 token.kind = .String;
@@ -75,5 +78,8 @@ pub fn TokenizeUnicode(
                 token.data = text[start_i..tokgen_it.i];
             },
         }
+
+        if (token.data.len > BUF_SIZE_TOK)
+            return error.TokenSizeExceeded;
     }
 }

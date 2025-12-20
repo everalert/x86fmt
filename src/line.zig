@@ -57,11 +57,12 @@ pub fn CtxParseMode(
         return;
     }
 
-    var case_buf: [BUF_SIZE_TOK]u8 = undefined;
-
     const tok = &lex[0].data[0];
+    assert(tok.data.len <= BUF_SIZE_TOK);
+
     ctx.Mode = switch (tok.kind) {
         .String => str: {
+            var case_buf: [BUF_SIZE_TOK]u8 = undefined;
             const lowercase = std.ascii.lowerString(&case_buf, tok.data);
 
             for (MacroNames) |mn| {
@@ -93,7 +94,6 @@ pub fn CtxUpdateSection(
     comptime BUF_SIZE_TOK: usize,
 ) void {
     if (ctx.Mode != .AsmDirective) return;
-    var case_buf: [BUF_SIZE_TOK]u8 = undefined;
 
     // detect section context
     const tok1, const tok2 = tokens: {
@@ -111,6 +111,10 @@ pub fn CtxUpdateSection(
             return;
         break :tokens .{ &d1[0], &d2[0] };
     };
+
+    assert(tok1.data.len <= BUF_SIZE_TOK);
+    assert(tok2.data.len <= BUF_SIZE_TOK);
+    var case_buf: [BUF_SIZE_TOK]u8 = undefined;
 
     const directive = std.ascii.lowerString(&case_buf, tok1.data);
     if (!std.mem.eql(u8, directive, "section")) return;
