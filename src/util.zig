@@ -49,10 +49,10 @@ pub inline fn BLSELE(b: bool, comptime T: type, v1: T, v2: T) T {
 // PADDING
 
 /// Add spaces up to given column, adding at least a given minimum number of spaces
-/// @out    Utf8LineMeasuringWriter.Writer
-pub fn PadSpaces(out: anytype, until: usize, min: usize) !void {
-    const n: usize = @max(min, until -| out.context.codepoints_since_newline);
-    try out.writeByteNTimes(' ', n);
+/// @writer    Utf8LineMeasuringWriter.Writer
+pub fn PadSpaces(writer: anytype, until: usize, min: usize) !void {
+    const n: usize = @max(min, until -| writer.context.codepoints_since_newline);
+    try writer.writeByteNTimes(' ', n);
 }
 
 /// A Writer that tracks how many UTF-8 codepoints have been written since the

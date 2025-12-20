@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 const CLI = @import("cli.zig");
 const Formatter = @import("format.zig").Formatter;
 
-const BUF_SIZE_LINE_IO = 4095;
+const BUF_SIZE_LINE_IO = 4096; // NOTE: meant to be 4095; std bug in Reader.readUntilDelimiterOrEof
 const BUF_SIZE_LINE_TOK = 1024;
 const BUF_SIZE_LINE_LEX = 512;
 const BUF_SIZE_TOK = 256;
