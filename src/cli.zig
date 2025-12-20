@@ -183,8 +183,7 @@ pub fn Deinit(self: *CLI, alloc: Allocator) void {
 // all helpers return whether they got a "hit" on a cli flag, indicating that the
 // parsing loop can short circuit
 
-// FIXME: bounds checking on int value
-/// parse arguent as value to the previous argument
+/// parse argument as value to the previous argument
 fn StageTwoCheck(
     alloc: Allocator,
     arg: []const u8,
@@ -203,7 +202,8 @@ fn StageTwoCheck(
             },
             .Int => |t| {
                 comptime assert(t.signedness == .unsigned);
-                out.* = std.fmt.parseUnsigned(ValT, arg, 10) catch out.*;
+                // overflow or wrong sign falls back to existing value
+                out.* = std.fmt.parseUnsigned(ValT, arg, 0) catch out.*;
             },
             else => @compileError("unsupported type"),
         }

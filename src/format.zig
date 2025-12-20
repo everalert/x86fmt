@@ -94,8 +94,8 @@ pub fn Formatter(
                     return error.SourceContainsBOM;
 
                 if (!std.unicode.utf8ValidateSlice(line_s)) {
-                    _ = out_w.write(line_s) catch unreachable; // FIXME: handle
-                    _ = out_w.write("\n") catch unreachable; // FIXME: handle
+                    _ = out_w.write(line_s) catch break;
+                    _ = out_w.write("\n") catch break;
                     continue;
                 }
 
@@ -143,14 +143,14 @@ pub fn Formatter(
                 blank_lines = (blank_lines + 1) * IBLAND(body.len == 0, comment.len == 0);
                 if (blank_lines > 0) {
                     if (blank_lines <= settings.MaxBlankLines)
-                        _ = out_w.write(line_ctx.NewLineStr) catch unreachable; // FIXME: handle
+                        _ = out_w.write(line_ctx.NewLineStr) catch break;
                     continue;
                 }
 
                 // TODO: smart comment positioning based on prev/next lines
                 if (BLAND(body.len == 0, comment.len > 0)) {
-                    _ = out_w.write(comment) catch unreachable; // FIXME: handle
-                    _ = out_w.write(line_ctx.NewLineStr) catch unreachable; // FIXME: handle
+                    _ = out_w.write(comment) catch break;
+                    _ = out_w.write(line_ctx.NewLineStr) catch break;
                     continue;
                 }
 
@@ -163,20 +163,19 @@ pub fn Formatter(
                     .AsmDirective,
                     .PreProcDirective,
                     .Macro,
-                    => try FormatGenericDirectiveLine(&out_w, line_lex.items, &line_ctx),
+                    => FormatGenericDirectiveLine(&out_w, line_lex.items, &line_ctx) catch break,
                     .Source,
-                    => try FormatSourceLine(&out_w, line_lex.items, &line_ctx),
-                    else => {},
+                    => FormatSourceLine(&out_w, line_lex.items, &line_ctx) catch break,
+                    else => unreachable,
                 }
 
                 // NOTE: assumes the comment slice will contain the leading semicolon
-                // FIXME: base on number of utf8 codepoints, not byte length of `line`
                 if (comment.len > 0) {
-                    try PadSpaces(out_w, line_ctx.ColCom, 1);
-                    _ = try out_w.write(comment); // FIXME: handle
+                    PadSpaces(out_w, line_ctx.ColCom, 1) catch break;
+                    _ = out_w.write(comment) catch break;
                 }
 
-                _ = try out_w.write(line_ctx.NewLineStr); // FIXME: handle
+                _ = out_w.write(line_ctx.NewLineStr) catch break;
             }
         }
 

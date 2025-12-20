@@ -17,7 +17,7 @@ var mem: [4096]u8 = undefined;
 pub fn main() !void {
     var fba = std.heap.FixedBufferAllocator.init(&mem);
     const alloc = fba.allocator();
-    const cli = try CLI.Parse(alloc); // FIXME: handle
+    const cli = CLI.Parse(alloc) catch return;
 
     if (cli.bShowHelp) {
         var stdo = std.io.getStdOut();
@@ -43,10 +43,10 @@ pub fn main() !void {
         };
         defer fo.close();
         var bw = std.io.bufferedWriter(fo.writer());
-        defer bw.flush() catch unreachable; // FIXME: handle
+        defer bw.flush() catch {};
 
         const fmt = Formatter(BUF_SIZE_LINE_IO, BUF_SIZE_LINE_TOK, BUF_SIZE_LINE_LEX, BUF_SIZE_TOK);
-        try fmt.Format(br.reader(), bw.writer(), cli.FmtSettings); // FIXME: handle
+        fmt.Format(br.reader(), bw.writer(), cli.FmtSettings) catch {};
     }
 
     if (cli.bIOFileSame)

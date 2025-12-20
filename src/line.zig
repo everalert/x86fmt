@@ -13,7 +13,6 @@ pub const State = enum { Label, Instruction, Operands, Comment };
 
 pub const Mode = enum { Blank, Unknown, Comment, Source, Macro, AsmDirective, PreProcDirective };
 
-// FIXME: should the line buffers be ref'd here?
 pub const Context = struct {
     Mode: Mode,
     Section: SectionKind,
