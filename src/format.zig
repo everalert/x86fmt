@@ -14,8 +14,7 @@ const IBLXOR = @import("util.zig").IBLXOR;
 const BLSEL = @import("util.zig").BLSEL;
 const BLSELE = @import("util.zig").BLSELE;
 const PadSpaces = @import("util.zig").PadSpaces;
-
-pub const Error = error{SourceContainsBOM};
+const utf8LineMeasuringWriter = @import("util.zig").utf8LineMeasuringWriter;
 
 pub const Settings = struct {
     TabSize: usize = 4,
@@ -57,9 +56,10 @@ pub fn Formatter(
     comptime BUF_SIZE_TOK: usize,
 ) type {
     return struct {
+        pub const Error = error{SourceContainsBOM};
+
         // TODO: ring buffer, to support line lookback
-        var OutBufLine = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
-        var ScrBufLine = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
+        var RawBufLine = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
         var TokBufLine = std.mem.zeroes([BUF_SIZE_LINE_TOK]Token);
         var LexBufLine = std.mem.zeroes([BUF_SIZE_LINE_LEX]Lexeme);
 
@@ -71,10 +71,11 @@ pub fn Formatter(
             in: anytype,
             out: anytype,
             settings: Settings,
-        ) Error!void {
-            var line = std.ArrayListUnmanaged(u8).initBuffer(&OutBufLine);
+        ) !void {
             var line_tok = std.ArrayListUnmanaged(Token).initBuffer(&TokBufLine);
             var line_lex = std.ArrayListUnmanaged(Lexeme).initBuffer(&LexBufLine);
+            var line_stream = utf8LineMeasuringWriter(out);
+            const line = line_stream.writer();
 
             var line_ctx = std.mem.zeroes(Line.Context);
             line_ctx.Mode = .Blank;
@@ -83,10 +84,8 @@ pub fn Formatter(
 
             var blank_lines: usize = 0;
             var line_i: usize = 0;
-            // FIXME: handle line read error
-            while (in.readUntilDelimiterOrEof(&ScrBufLine, '\n') catch unreachable) |line_s| : (line_i += 1) {
+            while (in.readUntilDelimiterOrEof(&RawBufLine, '\n') catch null) |line_s| : (line_i += 1) {
                 defer {
-                    line.clearRetainingCapacity();
                     line_tok.clearRetainingCapacity();
                     line_lex.clearRetainingCapacity();
                 }
@@ -164,22 +163,20 @@ pub fn Formatter(
                     .AsmDirective,
                     .PreProcDirective,
                     .Macro,
-                    => FormatGenericDirectiveLine(&line, line_lex.items, &line_ctx),
+                    => try FormatGenericDirectiveLine(&line, line_lex.items, &line_ctx),
                     .Source,
-                    => FormatSourceLine(&line, line_lex.items, &line_ctx),
+                    => try FormatSourceLine(&line, line_lex.items, &line_ctx),
                     else => {},
                 }
 
                 // NOTE: assumes the comment slice will contain the leading semicolon
                 // FIXME: base on number of utf8 codepoints, not byte length of `line`
                 if (comment.len > 0) {
-                    const pad_n: usize = @max(1, line_ctx.ColCom -| line.items.len);
-                    line.appendNTimesAssumeCapacity(32, pad_n);
-                    line.appendSliceAssumeCapacity(comment);
+                    try PadSpaces(line, line_ctx.ColCom, 1);
+                    _ = try line.write(comment); // FIXME: handle
                 }
 
-                _ = out.write(line.items) catch unreachable; // FIXME: handle
-                _ = out.write(line_ctx.NewLineStr) catch unreachable; // FIXME: handle
+                _ = try line.write(line_ctx.NewLineStr); // FIXME: handle
             }
         }
 
@@ -188,33 +185,32 @@ pub fn Formatter(
         /// @tok    tokenized source line, in the format produced by Token-related code
         /// @out    buffer must be empty for correct formatting
         fn FormatSourceLine(
-            out: *std.ArrayListUnmanaged(u8),
+            out: anytype, // Utf8LineMeasuringWriter.Writer
             lex: []const Lexeme,
             ctx: *const Line.Context,
-        ) void {
+        ) !void {
             var b_label = false;
             var line_state: Line.State = .Label;
-            var fmtgen_ci: usize = 0; // utf-8 codepoints pushed
             var fmtgen_i: usize = 0;
             while (fmtgen_i < lex.len) {
                 line_state = switch (line_state) {
                     .Label => ls: {
                         const t_len = lex[0].data[0].data.len;
                         b_label = lex[0].data[0].data[t_len - 1] == ':';
-                        PadSpaces(out, &fmtgen_ci, BLSEL(b_label, usize, ctx.ColLab, ctx.ColIns), 0);
+                        try PadSpaces(out, BLSEL(b_label, usize, ctx.ColLab, ctx.ColIns), 0);
                         const next_s = BLSELE(b_label, Line.State, .Instruction, .Operands);
 
-                        Lexeme.BufAppend(out, &lex[fmtgen_i], &fmtgen_i, &fmtgen_ci, BUF_SIZE_TOK);
+                        try Lexeme.BufAppend(out, &lex[fmtgen_i], &fmtgen_i, BUF_SIZE_TOK);
                         break :ls next_s;
                     },
                     .Instruction => ls: {
-                        PadSpaces(out, &fmtgen_ci, BLSEL(b_label, usize, ctx.ColLabIns, ctx.ColIns), 1);
-                        Lexeme.BufAppend(out, &lex[fmtgen_i], &fmtgen_i, &fmtgen_ci, BUF_SIZE_TOK);
+                        try PadSpaces(out, BLSEL(b_label, usize, ctx.ColLabIns, ctx.ColIns), 1);
+                        try Lexeme.BufAppend(out, &lex[fmtgen_i], &fmtgen_i, BUF_SIZE_TOK);
                         break :ls .Operands;
                     },
                     .Operands => ls: {
-                        PadSpaces(out, &fmtgen_ci, BLSEL(b_label, usize, ctx.ColLabOps, ctx.ColOps), 1);
-                        Lexeme.BufAppendSlice(out, lex[fmtgen_i..], &fmtgen_i, &fmtgen_ci, .{}, BUF_SIZE_TOK);
+                        try PadSpaces(out, BLSEL(b_label, usize, ctx.ColLabOps, ctx.ColOps), 1);
+                        try Lexeme.BufAppendSlice(out, lex[fmtgen_i..], &fmtgen_i, .{}, BUF_SIZE_TOK);
                         break :ls .Comment;
                     },
                     // input stream should be done by this point, comment printing will
@@ -225,17 +221,16 @@ pub fn Formatter(
         }
 
         fn FormatGenericDirectiveLine(
-            out: *std.ArrayListUnmanaged(u8),
+            out: anytype, // Utf8LineMeasuringWriter.Writer
             lex: []const Lexeme,
             ctx: *const Line.Context,
-        ) void {
+        ) !void {
             var fmtgen_i: usize = 0;
-            var fmtgen_ci: usize = 0;
-            PadSpaces(out, &fmtgen_ci, ctx.ColLab, 0);
-            Lexeme.BufAppendOpts(out, &lex[0], &fmtgen_i, &fmtgen_ci, .{ .bHeadToLower = true }, BUF_SIZE_TOK);
+            try PadSpaces(out, ctx.ColLab, 0);
+            try Lexeme.BufAppendOpts(out, &lex[0], &fmtgen_i, .{ .bHeadToLower = true }, BUF_SIZE_TOK);
             if (lex.len > 1) {
-                PadSpaces(out, &fmtgen_ci, fmtgen_ci, 1);
-                Lexeme.BufAppendSlice(out, lex[1..], &fmtgen_i, &fmtgen_ci, .{}, BUF_SIZE_TOK);
+                try out.writeByte(' ');
+                try Lexeme.BufAppendSlice(out, lex[1..], &fmtgen_i, .{}, BUF_SIZE_TOK);
             }
         }
     };
@@ -249,21 +244,25 @@ pub fn Formatter(
 //  future, although some are more generic (e.g. BOM test); also real end-to-end
 //  test should pull in source files at comptime?
 test "Format" {
-    const BUF_SIZE_LINE_IO = 4096;
+    const BUF_SIZE_LINE_IO = 4095;
     const BUF_SIZE_LINE_TOK = 1024;
     const BUF_SIZE_LINE_LEX = 1024;
     const BUF_SIZE_TOK = 256;
 
+    const fmt = Formatter(BUF_SIZE_LINE_IO, BUF_SIZE_LINE_TOK, BUF_SIZE_LINE_LEX, BUF_SIZE_TOK);
+
     const FormatTestCase = struct {
         in: []const u8,
         ex: []const u8 = &[_]u8{},
-        err: ?Error = null,
+        err: ?fmt.Error = null,
     };
 
+    const dummy32 = "Lorem ipsum dolor sit amet, cons";
+    const dummy1 = "a";
     const test_cases = [_]FormatTestCase{
         .{ // BOM
             .in = &[_]u8{ 0xEF, 0xBB, 0xBF } ++ " \t  my_label: mov eax,16; comment",
-            .err = Error.SourceContainsBOM,
+            .err = fmt.Error.SourceContainsBOM,
         },
         .{ // line with all 4
             .in = " \t  my_label: mov eax,16; comment",
@@ -378,6 +377,14 @@ test "Format" {
             .in = "%pragma invalid_utf8_\xf8\xa1\xa1\xa1\xa1",
             .ex = "%pragma invalid_utf8_\xf8\xa1\xa1\xa1\xa1\n",
         },
+        .{ // line length input buffer overrun (>4095)
+            .in = "mov eax, 16\nmov ebp, 16 ; " ++ dummy32 ** 128,
+            .ex = "    mov     eax, 16\n",
+        },
+        .{ // long (max) line length (4095)
+            .in = "mov eax, 16\nmov ebp, 16 ; " ++ dummy32 ** 127 ++ dummy1 ** 16,
+            .ex = "    mov     eax, 16\n    mov     ebp, 16                     ; " ++ dummy32 ** 127 ++ dummy1 ** 16 ++ "\n",
+        },
     };
 
     std.testing.log_level = .debug;
@@ -388,7 +395,6 @@ test "Format" {
         var output = std.ArrayList(u8).init(std.testing.allocator);
         defer output.deinit();
 
-        const fmt = Formatter(BUF_SIZE_LINE_IO, BUF_SIZE_LINE_TOK, BUF_SIZE_LINE_LEX, BUF_SIZE_TOK);
         const f = fmt.Format(input.reader(), output.writer(), .{});
 
         if (t.err) |ex_err| {

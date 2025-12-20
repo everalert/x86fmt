@@ -5,7 +5,7 @@ const assert = std.debug.assert;
 const CLI = @import("cli.zig");
 const Formatter = @import("format.zig").Formatter;
 
-const BUF_SIZE_LINE_IO = 4096;
+const BUF_SIZE_LINE_IO = 4095;
 const BUF_SIZE_LINE_TOK = 1024;
 const BUF_SIZE_LINE_LEX = 1024;
 const BUF_SIZE_TOK = 256;
@@ -57,4 +57,5 @@ pub fn main() !void {
 
 test {
     _ = @import("format.zig");
+    _ = @import("util.zig");
 }

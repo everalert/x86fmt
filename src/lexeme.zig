@@ -75,32 +75,29 @@ pub fn ParseTokens(out: *std.ArrayListUnmanaged(Lexeme), tok: []const Token) voi
 /// appends the contents of a lexeme to a byte array, advancing the provided
 /// utf-8 codepoint counter
 pub inline fn BufAppend(
-    out: *std.ArrayListUnmanaged(u8),
+    out: anytype, // Utf8LineMeasuringWriter.Writer
     lex: *const Lexeme,
     i: *usize,
-    ci: *usize,
     comptime BUF_SIZE_TOK: usize,
-) void {
-    BufAppendOpts(out, lex, i, ci, .{}, BUF_SIZE_TOK);
+) !void {
+    try BufAppendOpts(out, lex, i, .{}, BUF_SIZE_TOK);
 }
 
 /// appends the contents of a lexeme to a byte array, advancing the provided
 /// utf-8 codepoint counter
 pub fn BufAppendOpts(
-    out: *std.ArrayListUnmanaged(u8),
+    out: anytype, // Utf8LineMeasuringWriter.Writer
     lex: *const Lexeme,
     i: *usize,
-    ci: *usize,
     opts: Lexeme.Opts,
     comptime BUF_SIZE_TOK: usize,
-) void {
+) !void {
     switch (lex.kind) {
         .None => unreachable,
         .Separator => {
             assert(lex.data.len == 1);
-            out.appendSliceAssumeCapacity(lex.data[0].data);
-            out.appendAssumeCapacity(' ');
-            ci.* += 1 + (std.unicode.utf8CountCodepoints(lex.data[0].data) catch unreachable);
+            _ = try out.write(lex.data[0].data);
+            try out.writeByte(' ');
         },
         .Word => {
             var t_kind_prev: Token.Kind = .None;
@@ -109,17 +106,16 @@ pub fn BufAppendOpts(
                 defer t_kind_prev = t.kind;
 
                 if (BLAND(t.kind == .String, t.kind == t_kind_prev))
-                    out.appendAssumeCapacity(' ');
+                    try out.writeByte(' ');
 
                 if (BLAND(t.kind == .String, BLOR(opts.bToLower, BLAND(opts.bHeadToLower, !b_lower_emitted)))) {
                     var buf: [BUF_SIZE_TOK]u8 = undefined;
                     const lower = std.ascii.lowerString(&buf, t.data);
-                    out.appendSliceAssumeCapacity(lower);
+                    _ = try out.write(lower);
                     b_lower_emitted = true;
                 } else {
-                    out.appendSliceAssumeCapacity(t.data);
+                    _ = try out.write(t.data);
                 }
-                ci.* += std.unicode.utf8CountCodepoints(t.data) catch unreachable;
             }
         },
     }
@@ -129,18 +125,17 @@ pub fn BufAppendOpts(
 /// appends a series of lexemes to a byte array, advancing the provided utf-8
 /// codepoint counter
 pub fn BufAppendSlice(
-    out: *std.ArrayListUnmanaged(u8),
+    out: anytype, // Utf8LineMeasuringWriter.Writer
     lexemes: []const Lexeme,
     i: *usize,
-    ci: *usize,
     opts: Lexeme.Opts,
     comptime BUF_SIZE_TOK: usize,
-) void {
+) !void {
     var prev_kind: Lexeme.Kind = .None;
     for (lexemes, 0..) |*lex, li| {
         if (BLAND(li > 0, BLAND(lex.kind != .Separator, prev_kind != .Separator)))
-            PadSpaces(out, ci, i.*, 1);
-        BufAppendOpts(out, lex, i, ci, opts, BUF_SIZE_TOK);
+            try PadSpaces(out, i.*, 1);
+        try BufAppendOpts(out, lex, i, opts, BUF_SIZE_TOK);
         prev_kind = lex.kind;
     }
 }
