@@ -154,7 +154,7 @@ pub fn Formatter(
                     continue;
                 }
 
-                Token.TokenizeUnicode(&line_tok, body);
+                Token.TokenizeUnicode(&line_tok, body) catch break;
                 Lexeme.ParseTokens(&line_lex, line_tok.items);
                 Line.CtxParseMode(&line_ctx, line_lex.items, BUF_SIZE_TOK);
                 Line.CtxUpdateSection(&line_ctx, line_lex.items, &settings, BUF_SIZE_TOK);
@@ -384,6 +384,14 @@ test "Format" {
         .{ // long (max) line length (4095)
             .in = "mov eax, 16\nmov ebp, 16 ; " ++ dummy32 ** 127 ++ dummy1 ** 16,
             .ex = "    mov     eax, 16\n    mov     ebp, 16                     ; " ++ dummy32 ** 127 ++ dummy1 ** 16 ++ "\n",
+        },
+        .{ // line length token buffer overrun (>1024)
+            .in = "mov eax, 16\nmov ebp, 16 " ++ " a" ** 1024,
+            .ex = "    mov     eax, 16\n",
+        },
+        .{ // long (max) line tokens (1024)
+            .in = "mov eax, 16\nmov ebp, 16" ++ " a" ** 1020,
+            .ex = "    mov     eax, 16\n    mov     ebp, 16" ++ " a" ** 1020 ++ "\n",
         },
     };
 
