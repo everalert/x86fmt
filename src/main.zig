@@ -4,6 +4,7 @@ const assert = std.debug.assert;
 
 const CLI = @import("cli.zig");
 const Formatter = @import("format.zig").Formatter;
+const BLAND = @import("util.zig").BLAND;
 
 const BUF_SIZE_LINE_IO = 4096; // NOTE: meant to be 4095; std bug in Reader.readUntilDelimiterOrEof
 const BUF_SIZE_LINE_TOK = 1024;
@@ -21,7 +22,7 @@ pub fn main() !void {
 
     if (cli.bShowHelp) {
         var stdo = std.io.getStdOut();
-        _ = try stdo.write("x86fmt help\n\n\tHelp text not written yet, sorry...\n\n");
+        _ = try stdo.write(CLI.HelpText);
         return;
     }
 
@@ -30,7 +31,11 @@ pub fn main() !void {
             .File => try std.fs.cwd().openFile(cli.IFile, .{}),
             .Console => c: {
                 const c = std.io.getStdIn();
-                if (!cli.bAllowTty and c.isTty()) return;
+                if (BLAND(!cli.bAllowTty, c.isTty())) {
+                    var stdo = std.io.getStdOut();
+                    _ = try stdo.write(CLI.HelpTextShort);
+                    return;
+                }
                 break :c c;
             },
         };

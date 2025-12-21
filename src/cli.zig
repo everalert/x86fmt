@@ -1,5 +1,6 @@
 //! Reads settings from the command line. Arguments can be provided in any order
-//! and will short-circuit if repeated.
+//! and will short-circuit if repeated. See HelpText for details on options and
+//! usage.
 //!
 //! Settings provided by this module:
 //! - Input mode; defaults to stdin
@@ -8,34 +9,6 @@
 //! - Output file; will overwrite input file, unless output file specified
 //! - Show Help flag
 //! - Configuration of formatting values (comment column, etc.)
-//!
-//! The following flags are supported:
-//!     <file>              input mode = File, reading from <file>
-//!     -fo <file>          output mode = File, writing to <file>
-//!     -co                 output mode = Console (stdout)
-//!     -h, --help          display help information // FIXME: not yet written
-//!     -tty, --allow-tty   accept console input for stdin (default off)
-//!     -ts <num>,  --tab-size <num>                    default 4
-//!     -mbl <num>, --max-blank-lines <num>             default 2
-//!     -cc <num>,  --comment-col <num>                 default 40
-//!     -img <num>, --instruction-min-gap <num>         default 12
-//!     -omg <num>, --operands-min-gap <num>            default 8
-//!     -dcc <num>, --data-comment-col <num>            default 64
-//!     -dimg <num>, --data-instruction-min-gap <num>   default 16
-//!     -domg <num>, --data-operands-min-gap <num>      default 32
-//!     -sin <num>, --section-indent-none <num>         default 0
-//!     -sid <num>, --section-indent-data <num>         default 0
-//!     -sit <num>, --section-indent-text <num>         default 0
-//!     -sio <num>, --section-indent-other <num>        default 0
-//!
-//! Sample usage:
-//!     x86fmt (none)                       input: <stdin>    output: <stdout>
-//!     x86fmt source.s                     input: source.s   output: source.s
-//!     x86fmt source.s -co                 input: source.s   output: <stdout>
-//!     x86fmt source.s -fo output.s        input: source.s   output: output.s
-//!     x86fmt -fo output.s                 input: <stdin>    output: output.s
-//!     x86fmt -fo                          invalid
-//!     x86fmt source.s -co -ts 2           input: source.s   output: <stdout>   tab size 2
 const CLI = @This();
 
 const std = @import("std");
@@ -44,6 +17,68 @@ const assert = std.debug.assert;
 const eql = std.mem.eql;
 
 const FormatSettings = @import("format.zig").Settings;
+const VERSION_STRING = @import("version.zig").VERSION_STRING;
+
+pub const HelpTextHeader = "x86fmt " ++ VERSION_STRING ++ "\n" ++
+    \\https://github.com/everalert/x86fmt
+    \\
+    \\
+;
+
+pub const HelpTextShort = HelpTextHeader ++
+    \\  [file]              input mode = File, reading from [file]
+    \\  -fo [file]          output mode = File, writing to [file]
+    \\  -co                 output mode = Console (stdout)
+    \\  -tty, --allow-tty   accept console input for stdin (override this dialog)
+    \\
+    \\  -h, --help          Show detailed usage information
+    \\
+    \\
+;
+
+pub const HelpText = HelpTextHeader ++
+    \\  Freely mix and match file and stdio for input and output. See Sample Usage 
+    \\  section for concrete examples.
+    \\
+    \\  Default behaviour   input mode = Console (stdin)
+    \\                      output mode = match input
+    \\
+    \\Options
+    \\
+    \\  [file]              input mode = File, reading from [file]
+    \\  -fo [file]          output mode = File, writing to [file]
+    \\  -co                 output mode = Console (stdout)
+    \\  -tty, --allow-tty   accept console input for stdin (default piped input only)
+    \\
+    \\  -h, --help          Show this dialog without formatting
+    \\
+    \\Cosmetic Options
+    \\  
+    \\  -ts [num],   --tab-size [num]                    default 4
+    \\  -mbl [num],  --max-blank-lines [num]             default 2
+    \\  -cc [num],   --comment-column [num]              default 40
+    \\  -img [num],  --instruction-min-gap [num]         default 12
+    \\  -omg [num],  --operands-min-gap [num]            default 8
+    \\  -dcc [num],  --data-comment-column [num]         default 64
+    \\  -dimg [num], --data-instruction-min-gap [num]    default 16
+    \\  -domg [num], --data-operands-min-gap [num]       default 32
+    \\  -sin [num],  --section-indent-none [num]         default 0
+    \\  -sid [num],  --section-indent-data [num]         default 0
+    \\  -sit [num],  --section-indent-text [num]         default 0
+    \\  -sio [num],  --section-indent-other [num]        default 0
+    \\
+    \\Sample Usage
+    \\
+    \\  x86fmt (none)                       input: <stdin>    output: <stdout>
+    \\  x86fmt source.s                     input: source.s   output: source.s
+    \\  x86fmt source.s -co                 input: source.s   output: <stdout>
+    \\  x86fmt source.s -fo output.s        input: source.s   output: output.s
+    \\  x86fmt -fo output.s                 input: <stdin>    output: output.s
+    \\  x86fmt -fo                          (invalid)
+    \\  x86fmt source.s -co -ts 2           input: source.s   output: <stdout>   tab size 2
+    \\
+    \\
+;
 
 pub const IOKind = enum { Console, File };
 pub const CLIError = error{InvalidTwoPartArgument};
@@ -60,7 +95,7 @@ bShowHelp: bool,
 /// IFile and rename OFile in response to this being true.
 bIOFileSame: bool,
 
-// TODO: add help text (don't forget to update docs comment above)
+// TODO: change "gap" nomenclature to "advance"?
 // TODO: add tests. may need to rework input mechanism for testability, since
 //  Parse reads the process arguments directly.
 
