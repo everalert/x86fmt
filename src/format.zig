@@ -82,10 +82,14 @@ pub fn Formatter(
             line_ctx.Section = .None;
             Line.CtxUpdateColumns(&line_ctx, &settings);
 
+            var line_ctx_prev = line_ctx;
             var blank_lines: usize = 0;
             var line_i: usize = 0;
             while (reader.readUntilDelimiterOrEof(&RawBufLine, '\n') catch null) |line_s| : (line_i += 1) {
                 defer {
+                    line_ctx_prev = line_ctx;
+                    line_ctx.ActualColFirst = 0;
+                    line_ctx.ActualColCom = 0;
                     line_tok.clearRetainingCapacity();
                     line_lex.clearRetainingCapacity();
                 }
@@ -149,6 +153,9 @@ pub fn Formatter(
 
                 // TODO: smart comment positioning based on prev/next lines
                 if (BLAND(body.len == 0, comment.len > 0)) {
+                    const colcom = @max(line_ctx_prev.ActualColCom, line_ctx_prev.ActualColFirst);
+                    PadSpaces(out_w, colcom, 0) catch break;
+                    line_ctx.ActualColCom = out_stream.line_len;
                     _ = out_w.write(comment) catch break;
                     _ = out_w.write(line_ctx.NewLineStr) catch break;
                     continue;
@@ -172,9 +179,11 @@ pub fn Formatter(
                 // NOTE: assumes the comment slice will contain the leading semicolon
                 if (comment.len > 0) {
                     PadSpaces(out_w, line_ctx.ColCom, 1) catch break;
+                    line_ctx.ActualColCom = out_stream.line_len;
                     _ = out_w.write(comment) catch break;
                 }
 
+                line_ctx.ActualColFirst = out_stream.line_lws;
                 _ = out_w.write(line_ctx.NewLineStr) catch break;
             }
         }
@@ -434,20 +443,26 @@ test "Format" {
             ,
             .ex = null,
         },
-        // FIXME: do now
-        //.{ // comment-only line aligning with previous comment
-        //    .in =
-        //    \\sub esp, 32 ; 00 = x-base for pos side
-        //    \\          ; 04 = y-base for pos side
-        //    \\        ; 08 = x-base for neg side
-        //    ,
-        //    .ex =
-        //    \\    sub     esp, 32                     ; 00 = x-base for pos side
-        //    \\                                        ; 04 = y-base for pos side
-        //    \\                                        ; 08 = x-base for neg side
-        //    \\
-        //    ,
-        //},
+        .{ // comment-only line aligning with previous comment
+            .in =
+            \\    sub     esp, 32                     ; 00 = x-base for pos side
+            \\                                        ; 04 = y-base for pos side
+            \\                                        ; 08 = x-base for neg side
+            \\
+            ,
+            .ex = null,
+        },
+        .{ // comment-only line aligning with previous text if not blank
+            .in =
+            \\    sub     esp, 32
+            \\    ; 08 = x-base for neg side
+            \\    ; 08 = x-base for neg side
+            \\
+            \\; 08 = x-base for neg side
+            \\
+            ,
+            .ex = null,
+        },
         // FIXME: do now
         //.{ // default section should have data section formatting, also this
         //    // shouldn't just fold in general

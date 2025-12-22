@@ -23,6 +23,8 @@ pub const Context = struct {
     ColLabIns: usize, // column: instruction (with label present)
     ColLabOps: usize, // column: operands (with label present)
     NewLineStr: []const u8,
+    ActualColCom: usize, // the column that the comment actually ended up being written to
+    ActualColFirst: usize, // the first non-whitespace column
 };
 
 // NOTE: assembler directives: 'primitive' directives enclosed in square brackets,
