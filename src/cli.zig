@@ -96,10 +96,13 @@ bShowHelp: bool,
 bIOFileSame: bool,
 
 // TODO: change "gap" nomenclature to "advance"?
+// TODO: verify any files here instead of punting?
 // TODO: add tests. may need to rework input mechanism for testability, since
 //  Parse reads the process arguments directly.
 
-/// Parse command line arguments and generate a CLI settings object.
+/// Parse command line arguments and generate a CLI settings object. Caller is
+/// responsible for freeing memory with `Deinit`, and verifying the existence of
+/// any files indicated in the return value.
 pub fn Parse(alloc: Allocator) !CLI {
     var i_kind: ?IOKind = null;
     var o_kind: ?IOKind = null;

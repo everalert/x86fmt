@@ -3,6 +3,13 @@
     .version = "0.0.0",
     .minimum_zig_version = "0.13.0",
 
+    .dependencies = .{
+        .zbench = .{
+            .url = "https://github.com/hendriknielaender/zBench/archive/825b2267d4bff274cdcb515a8d87bfd7283be19e.tar.gz",
+            .hash = "1220776728be0ff572a3ff108ac334f373a8efd3ce252027adb967e6796f50d4a5e0",
+        },
+    },
+
     .paths = .{
         "build.zig",
         "build.zig.zon",

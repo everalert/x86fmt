@@ -420,6 +420,57 @@ test "Format" {
             .in = "mov " ++ "A" ** 256,
             .ex = "    mov     " ++ "A" ** 256 ++ "\n",
         },
+        // FIXME: do now
+        //.{ // treatment of whitespace and scopes within string
+        //    // "[ERROR] (00000000) " was folding to "[ERROR](00000000)"
+        //    .in = "strname db \"[ERROR] (00000000) \",0",
+        //    .ex = "    strname         db \"[ERROR] (00000000) \", 0\n",
+        //},
+        // FIXME: do now
+        //.{ // comment-only line aligning with previous comment
+        //    .in =
+        //    \\sub esp, 32 ; 00 = x-base for pos side
+        //    \\          ; 04 = y-base for pos side
+        //    \\        ; 08 = x-base for neg side
+        //    ,
+        //    .ex =
+        //    \\    sub     esp, 32                     ; 00 = x-base for pos side
+        //    \\                                        ; 04 = y-base for pos side
+        //    \\                                        ; 08 = x-base for neg side
+        //    \\
+        //    ,
+        //},
+        // FIXME: do now
+        //.{ // default section should have data section formatting, also this
+        //    // shouldn't just fold in general
+        //    .in =
+        //    \\struc ScreenBuffer
+        //    \\	.Width							resd 1
+        //    \\	.Height							resd 1
+        //    \\	.BytesPerPixel					resd 1
+        //    \\	.Pitch							resd 1
+        //    \\	.Memory							resd 1
+        //    \\	.hBitmap						resd 1
+        //    \\	.Info							resb BITMAPINFOHEADER_size
+        //    \\endstruc
+        //    ,
+        //    .ex = "",
+        //},
+        // TODO: complex nested alignment
+        //.{
+        //    .in =
+        //    \\section .data
+        //    \\	FontTitle:
+        //    \\	istruc ScreenFont
+        //    \\		at ScreenFont.GlyphW,		db 7
+        //    \\		at ScreenFont.GlyphH,		db 12
+        //    \\		at ScreenFont.AdvanceX,		db 8
+        //    \\		at ScreenFont.AdvanceY,		db 16
+        //    \\		at ScreenFont.pGlyphs,		dd GlyphsTitle
+        //    \\	iend
+        //    ,
+        //    .ex = "",
+        //},
     };
 
     std.testing.log_level = .debug;
