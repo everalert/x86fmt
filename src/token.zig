@@ -4,6 +4,7 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const BLOR = @import("util.zig").BLOR;
+const BLAND = @import("util.zig").BLAND;
 
 pub const Kind = enum(u8) { None, String, MathOp, Scope, Comma, Backslash, Whitespace };
 
@@ -38,7 +39,7 @@ pub fn TokenizeUnicode(
                 token.kind = .MathOp;
                 token.data = text[start_i..tokgen_it.i];
             },
-            '(', '[', '{', ')', ']', '}', '\"', '\'', '`' => {
+            '(', '[', '{', ')', ']', '}' => {
                 token.kind = .Scope;
                 token.data = text[start_i..tokgen_it.i];
             },
@@ -56,6 +57,19 @@ pub fn TokenizeUnicode(
                 }
                 _ = out.pop();
                 continue; // don't do post-switch checks, because there is nothing to check
+            },
+            '"', '\'', '`' => {
+                token.kind = .String;
+                token.data = text[start_i..tokgen_it.i];
+                var this_sl = tokgen_it.nextCodepointSlice() orelse break;
+                var b_escaped = false;
+                while (true) {
+                    const b_will_escape = this_sl[0] == '\\';
+                    defer b_escaped = b_will_escape;
+                    if (BLAND(!b_will_escape, this_sl[0] == c)) break;
+                    this_sl = tokgen_it.nextCodepointSlice() orelse break;
+                }
+                token.data = text[start_i..tokgen_it.i];
             },
             else => {
                 token.kind = .String;

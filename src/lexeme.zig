@@ -19,9 +19,8 @@ pub const Opts = packed struct(u32) {
 kind: Kind = .None,
 data: []const Token,
 
-const ScopeOpener = "([{\"'`";
-const ScopeCloser = ")]}\"'`";
-const ScopeEscapable = [_]bool{ false, false, false, true, true, true };
+const ScopeOpener = "([{";
+const ScopeCloser = ")]}";
 
 // keep the stream flat since this is just for visual grouping, but this is
 //  getting dangerously close to just generating an AST lol
@@ -30,13 +29,11 @@ pub fn ParseTokens(
     tok: []const Token,
 ) error{CapacityExceeded}!void {
     var scope: ?u8 = null;
-    var prev_token_kind: Token.Kind = .None;
     var start_i: usize = 0;
     for (tok, 0..) |t, i| {
         if (out.items.len >= out.capacity) return error.CapacityExceeded;
 
         var emit_lexeme: ?Kind = null;
-        defer prev_token_kind = t.kind;
         defer if (emit_lexeme) |k| {
             var lexeme: *Lexeme = out.addOneAssumeCapacity();
             lexeme.kind = k;
@@ -49,10 +46,7 @@ pub fn ParseTokens(
             .Scope => {
                 if (scope != null) {
                     const ci = std.mem.indexOfScalar(u8, ScopeCloser, t.data[0]);
-                    if (ci != null and BLAND(
-                        ScopeOpener[ci.?] == scope.?,
-                        !BLAND(ScopeEscapable[ci.?], prev_token_kind == .Backslash),
-                    )) {
+                    if (BLAND(ci != null, ScopeOpener[ci.?] == scope.?)) {
                         scope = null;
                         emit_lexeme = .Word;
                     }

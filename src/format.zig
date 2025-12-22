@@ -252,7 +252,7 @@ test "Format" {
 
     const FormatTestCase = struct {
         in: []const u8,
-        ex: []const u8 = &[_]u8{},
+        ex: ?[]const u8 = null,
         err: ?fmt.Error = null,
     };
 
@@ -420,12 +420,20 @@ test "Format" {
             .in = "mov " ++ "A" ** 256,
             .ex = "    mov     " ++ "A" ** 256 ++ "\n",
         },
-        // FIXME: do now
-        //.{ // treatment of whitespace and scopes within string
-        //    // "[ERROR] (00000000) " was folding to "[ERROR](00000000)"
-        //    .in = "strname db \"[ERROR] (00000000) \",0",
-        //    .ex = "    strname         db \"[ERROR] (00000000) \", 0\n",
-        //},
+        .{ // ensure whitespace isn't removed from nasm strings
+            .in =
+            \\    strname db " [ERROR] (00000000) ", 0
+            \\
+            ,
+            .ex = null,
+        },
+        .{ // extend nasm strings to end if newline hit without string scope closer
+            .in =
+            \\    strname db " [ERROR] (00000000) , 0
+            \\
+            ,
+            .ex = null,
+        },
         // FIXME: do now
         //.{ // comment-only line aligning with previous comment
         //    .in =
@@ -486,8 +494,9 @@ test "Format" {
         if (t.err) |ex_err| {
             try std.testing.expectError(ex_err, f);
         } else {
-            try std.testing.expectEqualStrings(t.ex, output.items);
-            try std.testing.expectEqual(t.ex.len, output.items.len);
+            const ex = if (t.ex) |ex| ex else t.in; // .ex null if input should not change
+            try std.testing.expectEqualStrings(ex, output.items);
+            try std.testing.expectEqual(ex.len, output.items.len);
         }
     }
 }
