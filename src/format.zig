@@ -513,6 +513,9 @@ test "Format" {
         //    ,
         //    .ex = "",
         //},
+        // TODO: non-scoped math statements without separating spaces ??
+        //    ATTACH_PARENT_PROCESS           equ -1
+        //    ATTACH_PARENT_PROCESS_ADDR      equ $-ATTACH_PARENT_PROCESS
     };
 
     std.testing.log_level = .debug;
