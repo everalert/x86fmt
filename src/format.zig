@@ -35,7 +35,7 @@ pub const Settings = struct {
 
     /// Alternate values for ComCol, InsMinGap and OpsMinGap, used only in the
     /// data-type section context (e.g. ".data", ".bss", ".tls").
-    DataComCol: usize = 64,
+    DataComCol: usize = 60,
     DataInsMinAdv: usize = 16,
     DataOpsMinAdv: usize = 32,
 
@@ -349,7 +349,7 @@ test "Format" {
             ,
             .ex =
             \\section .rodata
-            \\    strloc_errmsg_format_err        equ 9                       ; start of error code
+            \\    strloc_errmsg_format_err        equ 9                   ; start of error code
             \\
             ,
         },
