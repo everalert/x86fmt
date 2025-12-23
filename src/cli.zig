@@ -54,18 +54,18 @@ pub const HelpText = HelpTextHeader ++
     \\
     \\Cosmetic Options
     \\  
-    \\  -ts [num],   --tab-size [num]                    default 4
-    \\  -mbl [num],  --max-blank-lines [num]             default 2
-    \\  -cc [num],   --comment-column [num]              default 40
-    \\  -img [num],  --instruction-min-gap [num]         default 12
-    \\  -omg [num],  --operands-min-gap [num]            default 8
-    \\  -dcc [num],  --data-comment-column [num]         default 64
-    \\  -dimg [num], --data-instruction-min-gap [num]    default 16
-    \\  -domg [num], --data-operands-min-gap [num]       default 32
-    \\  -sin [num],  --section-indent-none [num]         default 0
-    \\  -sid [num],  --section-indent-data [num]         default 0
-    \\  -sit [num],  --section-indent-text [num]         default 0
-    \\  -sio [num],  --section-indent-other [num]        default 0
+    \\  -ts [num],  --tab-size [num]                    default 4
+    \\  -mbl [num], --max-blank-lines [num]             default 2
+    \\  -tcc [num], --text-comment-column [num]         default 40
+    \\  -tia [num], --text-instruction-advance [num]    default 12
+    \\  -toa [num], --text-operands-advance [num]       default 8
+    \\  -dcc [num], --data-comment-column [num]         default 64
+    \\  -dia [num], --data-instruction-advance [num]    default 16
+    \\  -doa [num], --data-operands-advance [num]       default 32
+    \\  -sin [num], --section-indent-none [num]         default 0
+    \\  -sid [num], --section-indent-data [num]         default 0
+    \\  -sit [num], --section-indent-text [num]         default 0
+    \\  -sio [num], --section-indent-other [num]        default 0
     \\
     \\Sample Usage
     \\
@@ -95,10 +95,34 @@ bShowHelp: bool,
 /// IFile and rename OFile in response to this being true.
 bIOFileSame: bool,
 
-// TODO: change "gap" nomenclature to "advance"?
 // TODO: verify any files here instead of punting?
 // TODO: add tests. may need to rework input mechanism for testability, since
 //  Parse reads the process arguments directly.
+
+const Waiters = struct {
+    fo: bool = false,
+    ts: bool = false,
+    mbl: bool = false,
+    tcc: bool = false,
+    tia: bool = false,
+    toa: bool = false,
+    dcc: bool = false,
+    dia: bool = false,
+    doa: bool = false,
+    sin: bool = false,
+    sid: bool = false,
+    sit: bool = false,
+    sio: bool = false,
+
+    pub fn AnyWaiting(self: *const Waiters) bool {
+        var cnt_true: usize = 0;
+        inline for (std.meta.fields(Waiters)) |f| {
+            comptime assert(f.type == bool);
+            cnt_true += @intFromBool(@field(self, f.name));
+        }
+        return cnt_true > 0;
+    }
+};
 
 /// Parse command line arguments and generate a CLI settings object. Caller is
 /// responsible for freeing memory with `Deinit`, and verifying the existence of
@@ -113,63 +137,14 @@ pub fn Parse(alloc: Allocator) !CLI {
     var b_io_file_same = false;
     var fmt = FormatSettings{};
 
-    var b_ts_waiter = false;
-    var b_mbl_waiter = false;
-    var b_cc_waiter = false;
-    var b_img_waiter = false;
-    var b_omg_waiter = false;
-    var b_dcc_waiter = false;
-    var b_dimg_waiter = false;
-    var b_domg_waiter = false;
-    var b_sin_waiter = false;
-    var b_sid_waiter = false;
-    var b_sit_waiter = false;
-    var b_sio_waiter = false;
-    var b_fo_waiter = false;
+    var waiters = std.mem.zeroes(Waiters);
 
     var args = try std.process.argsWithAllocator(alloc);
     defer args.deinit();
     _ = args.next();
     while (args.next()) |arg| {
-        const ts = RawCheck(arg, &.{ "-ts", "--tab-size" });
-        if (StageTwoCheck(alloc, arg, ts, usize, &fmt.TabSize, &b_ts_waiter))
-            continue;
-        const mbl = RawCheck(arg, &.{ "-mbl", "--max-blank-lines" });
-        if (StageTwoCheck(alloc, arg, mbl, usize, &fmt.MaxBlankLines, &b_mbl_waiter))
-            continue;
-        const cc = RawCheck(arg, &.{ "-cc", "--comment-column" });
-        if (StageTwoCheck(alloc, arg, cc, usize, &fmt.ComCol, &b_cc_waiter))
-            continue;
-        const img = RawCheck(arg, &.{ "-img", "--instruction-min-gap" });
-        if (StageTwoCheck(alloc, arg, img, usize, &fmt.InsMinGap, &b_img_waiter))
-            continue;
-        const omg = RawCheck(arg, &.{ "-omg", "--operands-min-gap" });
-        if (StageTwoCheck(alloc, arg, omg, usize, &fmt.OpsMinGap, &b_omg_waiter))
-            continue;
-        const dcc = RawCheck(arg, &.{ "-dcc", "--data-comment-column" });
-        if (StageTwoCheck(alloc, arg, dcc, usize, &fmt.DataComCol, &b_dcc_waiter))
-            continue;
-        const dimg = RawCheck(arg, &.{ "-dimg", "--data-instruction-min-gap" });
-        if (StageTwoCheck(alloc, arg, dimg, usize, &fmt.DataInsMinGap, &b_dimg_waiter))
-            continue;
-        const domg = RawCheck(arg, &.{ "-domg", "--data-operands-min-gap" });
-        if (StageTwoCheck(alloc, arg, domg, usize, &fmt.DataOpsMinGap, &b_domg_waiter))
-            continue;
-        const sin = RawCheck(arg, &.{ "-sin", "--section-indent-none" });
-        if (StageTwoCheck(alloc, arg, sin, usize, &fmt.SectionIndentNone, &b_sin_waiter))
-            continue;
-        const sid = RawCheck(arg, &.{ "-sid", "--section-indent-data" });
-        if (StageTwoCheck(alloc, arg, sid, usize, &fmt.SectionIndentData, &b_sid_waiter))
-            continue;
-        const sit = RawCheck(arg, &.{ "-sit", "--section-indent-text" });
-        if (StageTwoCheck(alloc, arg, sit, usize, &fmt.SectionIndentText, &b_sit_waiter))
-            continue;
-        const sio = RawCheck(arg, &.{ "-sio", "--section-indent-other" });
-        if (StageTwoCheck(alloc, arg, sio, usize, &fmt.SectionIndentOther, &b_sio_waiter))
-            continue;
-
         const fo = EnumCheckOnce(arg, &.{"-fo"}, IOKind, .File, &o_kind);
-        if (StageTwoCheck(alloc, arg, fo, []const u8, &o_file, &b_fo_waiter))
+        if (StageTwoCheck(alloc, arg, fo, []const u8, &o_file, &waiters.fo))
             continue;
         if (EnumCheckOnce(arg, &.{"-co"}, IOKind, .Console, &o_kind))
             continue;
@@ -180,14 +155,49 @@ pub fn Parse(alloc: Allocator) !CLI {
         if (BoolCheckOnce(arg, &.{ "-h", "--help" }, &b_show_help))
             break;
 
+        const ts = RawCheck(arg, &.{ "-ts", "--tab-size" });
+        if (StageTwoCheck(alloc, arg, ts, usize, &fmt.TabSize, &waiters.ts))
+            continue;
+        const mbl = RawCheck(arg, &.{ "-mbl", "--max-blank-lines" });
+        if (StageTwoCheck(alloc, arg, mbl, usize, &fmt.MaxBlankLines, &waiters.mbl))
+            continue;
+        const tcc = RawCheck(arg, &.{ "-tcc", "--text-comment-column" });
+        if (StageTwoCheck(alloc, arg, tcc, usize, &fmt.TextComCol, &waiters.tcc))
+            continue;
+        const tia = RawCheck(arg, &.{ "-tia", "--text-instruction-advance" });
+        if (StageTwoCheck(alloc, arg, tia, usize, &fmt.TextInsMinAdv, &waiters.tia))
+            continue;
+        const toa = RawCheck(arg, &.{ "-toa", "--text-operands-advance" });
+        if (StageTwoCheck(alloc, arg, toa, usize, &fmt.TextOpsMinAdv, &waiters.toa))
+            continue;
+        const dcc = RawCheck(arg, &.{ "-dcc", "--data-comment-column" });
+        if (StageTwoCheck(alloc, arg, dcc, usize, &fmt.DataComCol, &waiters.dcc))
+            continue;
+        const dia = RawCheck(arg, &.{ "-dia", "--data-instruction-advance" });
+        if (StageTwoCheck(alloc, arg, dia, usize, &fmt.DataInsMinAdv, &waiters.dia))
+            continue;
+        const doa = RawCheck(arg, &.{ "-doa", "--data-operands-advance" });
+        if (StageTwoCheck(alloc, arg, doa, usize, &fmt.DataOpsMinAdv, &waiters.doa))
+            continue;
+        const sin = RawCheck(arg, &.{ "-sin", "--section-indent-none" });
+        if (StageTwoCheck(alloc, arg, sin, usize, &fmt.SectionIndentNone, &waiters.sin))
+            continue;
+        const sid = RawCheck(arg, &.{ "-sid", "--section-indent-data" });
+        if (StageTwoCheck(alloc, arg, sid, usize, &fmt.SectionIndentData, &waiters.sid))
+            continue;
+        const sit = RawCheck(arg, &.{ "-sit", "--section-indent-text" });
+        if (StageTwoCheck(alloc, arg, sit, usize, &fmt.SectionIndentText, &waiters.sit))
+            continue;
+        const sio = RawCheck(arg, &.{ "-sio", "--section-indent-other" });
+        if (StageTwoCheck(alloc, arg, sio, usize, &fmt.SectionIndentOther, &waiters.sio))
+            continue;
+
         if (i_kind != null) break;
         i_kind = .File;
         i_file = try alloc.dupeZ(u8, arg);
     }
 
-    const b_any_waiting = (@intFromBool(b_fo_waiter) | @intFromBool(b_ts_waiter) | @intFromBool(b_cc_waiter) |
-        @intFromBool(b_img_waiter) | @intFromBool(b_omg_waiter) | @intFromBool(b_mbl_waiter)) > 0;
-    if (b_any_waiting) return CLIError.InvalidTwoPartArgument;
+    if (waiters.AnyWaiting()) return CLIError.InvalidTwoPartArgument;
 
     if (i_kind == null) i_kind = .Console;
     if (o_kind == null) o_kind = i_kind;

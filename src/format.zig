@@ -24,22 +24,20 @@ pub const Settings = struct {
     MaxBlankLines: usize = 2,
 
     /// Comment column, when line is not a standalone comment.
-    ComCol: usize = 40,
+    TextComCol: usize = 40,
 
-    /// Columns between start of label and instruction, rounded up to next multiple
-    /// of TabSize. Lines without a label will ignore this setting and inset the
-    /// instruction by TabSize.
-    InsMinGap: usize = 12,
+    /// Columns to advance from start of label to instruction. Lines without a
+    /// label will ignore this setting and inset the instruction by TabSize.
+    TextInsMinAdv: usize = 12,
 
-    /// Columns between start of instruction and start of operands, rounded up to
-    /// the next multiple of TabSize.
-    OpsMinGap: usize = 8,
+    /// Columns to advance from start of instruction to operands.
+    TextOpsMinAdv: usize = 8,
 
     /// Alternate values for ComCol, InsMinGap and OpsMinGap, used only in the
     /// data-type section context (e.g. ".data", ".bss", ".tls").
     DataComCol: usize = 64,
-    DataInsMinGap: usize = 16,
-    DataOpsMinGap: usize = 32,
+    DataInsMinAdv: usize = 16,
+    DataOpsMinAdv: usize = 32,
 
     /// Base indentation for different section contexts (e.g. "section .data").
     /// Other offsets are added to these depending on the section type.
@@ -273,50 +271,53 @@ test "Format" {
             .err = fmt.Error.SourceContainsBOM,
         },
         .{ // line with all 4
-            .in = " \t  my_label: mov eax,16; comment",
-            .ex = "my_label:   mov     eax, 16             ; comment\n",
+            .in = "section .text\n" ++ " \t  my_label: mov eax,16; comment",
+            .ex = "section .text\n" ++ "my_label:   mov     eax, 16             ; comment\n",
         },
         .{ // no label
-            .in = " \t  mov  eax,16; comment",
-            .ex = "    mov     eax, 16                     ; comment\n",
+            .in = "section .text\n" ++ " \t  mov  eax,16; comment",
+            .ex = "section .text\n" ++ "    mov     eax, 16                     ; comment\n",
         },
         .{ // bracketed scope
-            .in = " \t  mov  dword[eax + ebp*2],16; comment",
-            .ex = "    mov     dword [eax+ebp*2], 16       ; comment\n",
+            .in = "section .text\n" ++ " \t  mov  dword[eax + ebp*2],16; comment",
+            .ex = "section .text\n" ++ "    mov     dword [eax+ebp*2], 16       ; comment\n",
         },
         .{ // multiline with lone "label header"
             .in =
+            \\section .text
             \\    my_label:
             \\mov eax,16; comment
             ,
             .ex =
+            \\section .text
             \\my_label:
             \\    mov     eax, 16                     ; comment
             \\
             ,
         },
         .{ // label and colon without whitespace
-            .in = "my_label:mov eax,16",
-            .ex = "my_label:   mov     eax, 16\n",
+            .in = "section .text\n" ++ "my_label:mov eax,16",
+            .ex = "section .text\n" ++ "my_label:   mov     eax, 16\n",
         },
         .{ // multiline with crlf break
-            .in = "my_label:\r\nmov eax,16; comment",
-            .ex = "my_label:\r\n    mov     eax, 16                     ; comment\r\n",
+            .in = "section .text\r\n" ++ "my_label:\r\nmov eax,16; comment",
+            .ex = "section .text\r\n" ++ "my_label:\r\n    mov     eax, 16                     ; comment\r\n",
         },
         .{ // double multiline
-            .in = "  my_label:\n\nmov eax,16; comment",
-            .ex = "my_label:\n\n    mov     eax, 16                     ; comment\n",
+            .in = "section .text\n" ++ "  my_label:\n\nmov eax,16; comment",
+            .ex = "section .text\n" ++ "my_label:\n\n    mov     eax, 16                     ; comment\n",
         },
         .{ // double multiline crlf
-            .in = "  my_label:\r\n\r\nmov eax,16; comment",
-            .ex = "my_label:\r\n\r\n    mov     eax, 16                     ; comment\r\n",
+            .in = "section .text\r\n" ++ "  my_label:\r\n\r\nmov eax,16; comment",
+            .ex = "section .text\r\n" ++ "my_label:\r\n\r\n    mov     eax, 16                     ; comment\r\n",
         },
         .{ // 3 blank lines -> fold to 2
-            .in = "  my_label:\n\n\n\nmov eax,16; comment",
-            .ex = "my_label:\n\n\n    mov     eax, 16                     ; comment\n",
+            .in = "section .text\n" ++ "  my_label:\n\n\n\nmov eax,16; comment",
+            .ex = "section .text\n" ++ "my_label:\n\n\n    mov     eax, 16                     ; comment\n",
         },
         .{ // 3 blank lines with comment -> not folded
             .in =
+            \\section .text
             \\my_label:
             \\
             \\; comment1
@@ -324,6 +325,7 @@ test "Format" {
             \\mov eax,16; comment2
             ,
             .ex =
+            \\section .text
             \\my_label:
             \\
             \\; comment1
@@ -333,12 +335,12 @@ test "Format" {
             ,
         },
         .{ // extern (assembler directive)
-            .in = "extern _SomeFunctionName@12",
-            .ex = "extern _SomeFunctionName@12\n",
+            .in = "section .text\n" ++ "extern _SomeFunctionName@12",
+            .ex = "section .text\n" ++ "extern _SomeFunctionName@12\n",
         },
         .{ // section text, primitive assembler directive
-            .in = " [ section  .text ] ",
-            .ex = "[section .text]\n",
+            .in = "section .text\n" ++ " [ section  .text ] ",
+            .ex = "section .text\n" ++ "[section .text]\n",
         },
         .{ // section data
             .in =
@@ -352,49 +354,49 @@ test "Format" {
             ,
         },
         .{ // section other
-            .in = "section  whatever",
-            .ex = "section whatever\n",
+            .in = "section .text\n" ++ "section  whatever",
+            .ex = "section .text\n" ++ "section whatever\n",
         },
         .{ // %macro (case-insensitive)
-            .in = "%mACRO CoolMacro 2",
-            .ex = "%macro CoolMacro 2\n",
+            .in = "section .text\n" ++ "%mACRO CoolMacro 2",
+            .ex = "section .text\n" ++ "%macro CoolMacro 2\n",
         },
         .{ // %imacro (case-insensitive)
-            .in = "%IMAcro CoolMacro 2",
-            .ex = "%imacro CoolMacro 2\n",
+            .in = "section .text\n" ++ "%IMAcro CoolMacro 2",
+            .ex = "section .text\n" ++ "%imacro CoolMacro 2\n",
         },
         .{ // %endmacro (case-insensitive)
-            .in = "%enDMACro",
-            .ex = "%endmacro\n",
+            .in = "section .text\n" ++ "%enDMACro",
+            .ex = "section .text\n" ++ "%endmacro\n",
         },
         .{ // misc preprocessor directive
-            .in = "%pragma    something",
-            .ex = "%pragma something\n",
+            .in = "section .text\n" ++ "%pragma    something",
+            .ex = "section .text\n" ++ "%pragma something\n",
         },
         .{ // comment detection
-            .in = "string  db \"Atta'c'h;Console Failed!\",0; comment",
-            .ex = "    string  db \"Atta'c'h;Console Failed!\", 0 ; comment\n",
+            .in = "section .text\n" ++ "string  db \"Atta'c'h;Console Failed!\",0; comment",
+            .ex = "section .text\n" ++ "    string  db \"Atta'c'h;Console Failed!\", 0 ; comment\n",
         },
         .{ // invalid utf8 (codepoint malformed)
             // https://stackoverflow.com/a/3886015
-            .in = "%pragma invalid_utf8_\xf0\x28\x8c\xbc",
-            .ex = "%pragma invalid_utf8_\xf0\x28\x8c\xbc\n",
+            .in = "section .text\n" ++ "%pragma invalid_utf8_\xf0\x28\x8c\xbc",
+            .ex = "section .text\n" ++ "%pragma invalid_utf8_\xf0\x28\x8c\xbc\n",
         },
         .{ // invalid utf8 (codepoint out of range)
             // https://stackoverflow.com/a/3886015
-            .in = "%pragma invalid_utf8_\xf8\xa1\xa1\xa1\xa1",
-            .ex = "%pragma invalid_utf8_\xf8\xa1\xa1\xa1\xa1\n",
+            .in = "section .text\n" ++ "%pragma invalid_utf8_\xf8\xa1\xa1\xa1\xa1",
+            .ex = "section .text\n" ++ "%pragma invalid_utf8_\xf8\xa1\xa1\xa1\xa1\n",
         },
         // line byte limit (4095)
         // WARN: BUF_SIZE_LINE_IO==4096 in order to have 4095 boundary; std bug
         //  in Reader.readUntilDelimiterOrEof causes early error
         .{ // line byte limit overrun
-            .in = "mov ebp, 16 ; " ++ dummy32 ** 127 ++ dummy1 ** 18,
-            .ex = "",
+            .in = "section .text\n" ++ "mov ebp, 16 ; " ++ dummy32 ** 127 ++ dummy1 ** 18,
+            .ex = "section .text\n" ++ "",
         },
         .{ // long (max) line length
-            .in = "mov ebp, 16 ; " ++ dummy32 ** 127 ++ dummy1 ** 17,
-            .ex = "    mov     ebp, 16                     ; " ++ dummy32 ** 127 ++ dummy1 ** 17 ++ "\n",
+            .in = "section .text\n" ++ "mov ebp, 16 ; " ++ dummy32 ** 127 ++ dummy1 ** 17,
+            .ex = "section .text\n" ++ "    mov     ebp, 16                     ; " ++ dummy32 ** 127 ++ dummy1 ** 17 ++ "\n",
         },
         // FIXME: really need to move these tests to the appropriate place; starting
         //  to clash a little
@@ -404,33 +406,34 @@ test "Format" {
         //  not affect the results of following ones
         // line token buffer limits (1024)
         .{ // line length token buffer overrun
-            .in = "mov eax, 16\nmov ebp, 16" ++ " [es:eax]" ** 256,
-            .ex = "    mov     eax, 16\n",
+            .in = "section .text\n" ++ "mov eax, 16\nmov ebp, 16" ++ " [es:eax]" ** 256,
+            .ex = "section .text\n" ++ "    mov     eax, 16\n",
         },
         .{ // long (max) line tokens
-            .in = "mov eax, 16\nmov ebp, 16" ++ " [es:eax]" ** 255,
-            .ex = "    mov     eax, 16\n    mov     ebp, 16" ++ " [es: eax]" ** 255 ++ "\n",
+            .in = "section .text\n" ++ "mov eax, 16\nmov ebp, 16" ++ " [es:eax]" ** 255,
+            .ex = "section .text\n" ++ "    mov     eax, 16\n    mov     ebp, 16" ++ " [es: eax]" ** 255 ++ "\n",
         },
         // line lexeme buffer limits (512)
         .{ // line length lexeme buffer overrun
-            .in = "mov eax, 16\nmov ebp, 16" ++ " a" ** 509,
-            .ex = "    mov     eax, 16\n",
+            .in = "section .text\n" ++ "mov eax, 16\nmov ebp, 16" ++ " a" ** 509,
+            .ex = "section .text\n" ++ "    mov     eax, 16\n",
         },
         .{ // long (max) line lexemes
-            .in = "mov eax, 16\nmov ebp, 16" ++ " a" ** 508,
-            .ex = "    mov     eax, 16\n    mov     ebp, 16" ++ " a" ** 508 ++ "\n",
+            .in = "section .text\n" ++ "mov eax, 16\nmov ebp, 16" ++ " a" ** 508,
+            .ex = "section .text\n" ++ "    mov     eax, 16\n    mov     ebp, 16" ++ " a" ** 508 ++ "\n",
         },
         // individual token size limits (256)
         .{ // token size overrun
-            .in = "mov " ++ "A" ** 257,
-            .ex = "",
+            .in = "section .text\n" ++ "mov " ++ "A" ** 257,
+            .ex = "section .text\n" ++ "",
         },
         .{ // long token
-            .in = "mov " ++ "A" ** 256,
-            .ex = "    mov     " ++ "A" ** 256 ++ "\n",
+            .in = "section .text\n" ++ "mov " ++ "A" ** 256,
+            .ex = "section .text\n" ++ "    mov     " ++ "A" ** 256 ++ "\n",
         },
         .{ // ensure whitespace isn't removed from nasm strings
             .in =
+            \\section .text
             \\    strname db " [ERROR] (00000000) ", 0
             \\
             ,
@@ -438,6 +441,7 @@ test "Format" {
         },
         .{ // extend nasm strings to end if newline hit without string scope closer
             .in =
+            \\section .text
             \\    strname db " [ERROR] (00000000) , 0
             \\
             ,
@@ -445,6 +449,7 @@ test "Format" {
         },
         .{ // comment-only line aligning with previous comment
             .in =
+            \\section .text
             \\    sub     esp, 32                     ; 00 = x-base for pos side
             \\                                        ; 04 = y-base for pos side
             \\                                        ; 08 = x-base for neg side
@@ -454,6 +459,7 @@ test "Format" {
         },
         .{ // comment-only line aligning with previous text if not blank
             .in =
+            \\section .text
             \\    sub     esp, 32
             \\    ; 08 = x-base for neg side
             \\    ; 08 = x-base for neg side
@@ -463,22 +469,35 @@ test "Format" {
             ,
             .ex = null,
         },
-        // FIXME: do now
-        //.{ // default section should have data section formatting, also this
-        //    // shouldn't just fold in general
-        //    .in =
-        //    \\struc ScreenBuffer
-        //    \\	.Width							resd 1
-        //    \\	.Height							resd 1
-        //    \\	.BytesPerPixel					resd 1
-        //    \\	.Pitch							resd 1
-        //    \\	.Memory							resd 1
-        //    \\	.hBitmap						resd 1
-        //    \\	.Info							resb BITMAPINFOHEADER_size
-        //    \\endstruc
-        //    ,
-        //    .ex = "",
-        //},
+        .{ // default section should have data section formatting, also this
+            // shouldn't just fold in general
+            .in =
+            \\    struc                           ScreenBuffer
+            \\    .Width                          resd 1
+            \\    .Height                         resd 1
+            \\    .BytesPerPixel                  resd 1
+            \\    .Pitch                          resd 1
+            \\    .Memory                         resd 1
+            \\    .hBitmap                        resd 1
+            \\    .Info                           resb BITMAPINFOHEADER_size
+            \\    endstruc
+            \\
+            ,
+            // TODO: should be something like this once nested stuff is done
+            //.in =
+            //\\struc ScreenBuffer
+            //\\    .Width                          resd 1
+            //\\    .Height                         resd 1
+            //\\    .BytesPerPixel                  resd 1
+            //\\    .Pitch                          resd 1
+            //\\    .Memory                         resd 1
+            //\\    .hBitmap                        resd 1
+            //\\    .Info                           resb BITMAPINFOHEADER_size
+            //\\endstruc
+            //\\
+            //,
+            .ex = null,
+        },
         // TODO: complex nested alignment
         //.{
         //    .in =

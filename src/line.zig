@@ -138,29 +138,20 @@ pub fn CtxUpdateSection(
 }
 
 pub fn CtxUpdateColumns(ctx: *Context, fmt: *const FormatSettings) void {
-    switch (ctx.Section) {
-        .Data => {
-            const base = fmt.SectionIndentData;
-            ctx.ColLab = base;
-            ctx.ColCom = fmt.DataComCol;
-            ctx.ColIns = base + fmt.TabSize;
-            ctx.ColOps = base + fmt.TabSize + fmt.DataOpsMinGap;
-            ctx.ColLabIns = base + fmt.DataInsMinGap;
-            ctx.ColLabOps = base + fmt.DataInsMinGap + fmt.DataOpsMinGap;
-        },
-        else => |s| {
-            const base = switch (s) {
-                .None => fmt.SectionIndentNone,
-                .Text => fmt.SectionIndentText,
-                .Other => fmt.SectionIndentOther,
-                else => unreachable,
-            };
-            ctx.ColLab = base;
-            ctx.ColCom = fmt.ComCol;
-            ctx.ColIns = base + fmt.TabSize;
-            ctx.ColOps = base + fmt.TabSize + fmt.OpsMinGap;
-            ctx.ColLabIns = base + fmt.InsMinGap;
-            ctx.ColLabOps = base + fmt.InsMinGap + fmt.OpsMinGap;
-        },
-    }
+    const base = switch (ctx.Section) {
+        .None => fmt.SectionIndentNone,
+        .Text => fmt.SectionIndentText,
+        .Other => fmt.SectionIndentOther,
+        .Data => fmt.SectionIndentData,
+    };
+    const com_col, const ops_min_adv, const ins_min_adv = switch (ctx.Section) {
+        .Data, .None => .{ fmt.DataComCol, fmt.DataOpsMinAdv, fmt.DataInsMinAdv },
+        .Text, .Other => .{ fmt.TextComCol, fmt.TextOpsMinAdv, fmt.TextInsMinAdv },
+    };
+    ctx.ColLab = base;
+    ctx.ColCom = com_col;
+    ctx.ColIns = base + fmt.TabSize;
+    ctx.ColOps = base + fmt.TabSize + ops_min_adv;
+    ctx.ColLabIns = base + ins_min_adv;
+    ctx.ColLabOps = base + ins_min_adv + ops_min_adv;
 }
