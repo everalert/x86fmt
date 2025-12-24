@@ -42,7 +42,7 @@ pub fn ParseTokens(
         };
 
         switch (t.kind) {
-            .None, .Whitespace => unreachable,
+            .None, .Whitespace, .Comment => unreachable,
             .Scope => {
                 if (scope != null) {
                     const ci = std.mem.indexOfScalar(u8, ScopeCloser, t.data[0]);

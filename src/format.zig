@@ -259,7 +259,7 @@ test "Format" {
 
     const FormatTestCase = struct {
         in: []const u8,
-        ex: ?[]const u8 = null,
+        ex: []const u8 = &[_]u8{},
         err: ?fmt.Error = null,
     };
 
@@ -311,6 +311,9 @@ test "Format" {
             //\\endstruc
             // START: text section formatting
             \\section .text
+            \\
+            // line with all 4
+            \\my_label:   mov     eax, 16             ; comment
             \\
             // no label
             \\    mov     eax, 16                     ; comment
@@ -370,7 +373,6 @@ test "Format" {
             // END
             \\
             ,
-            .ex = null,
         },
         // NOTE: code that either needs to be in a separate test, or otherwise
         //  needs further consideration or treatment
@@ -479,6 +481,22 @@ test "Format" {
             \\%endmacro
             \\
         },
+        // non-trivial whitespace
+        .{
+            // label and colon without whitespace
+            .in =
+            \\section .text
+            \\my_label:mov eax,16
+            // removing excess whitespace in scope context
+            \\ [ section  .text ] a
+            ,
+            .ex =
+            \\section .text
+            \\my_label:   mov     eax, 16
+            \\[section .text] a
+            \\
+            ,
+        },
         // pass through invalid utf-8 without formatting
         // https://stackoverflow.com/a/3886015
         .{
@@ -487,41 +505,34 @@ test "Format" {
                 "%pragma     invalid_utf8_\xf0\x28\x8c\xbc \n" ++
                 // invalid utf8 (codepoint out of range)
                 "%pragma   invalid_utf8_\xf8\xa1\xa1\xa1\xa1   \n",
-            .ex = null,
         },
         // line byte limit (4095)
         // WARN: BUF_SIZE_LINE_IO==4096 in order to have 4095 boundary; std bug
         //  in Reader.readUntilDelimiterOrEof causes early error
         // TODO: passthrough in this context instead of aborting? also, in future
         //  this may not be relevant with a new memory/parsing model
-        .{ // line byte limit overrun
-            .in = "section .text\n" ++ "mov ebp, 16 ; " ++ dummy32 ** 127 ++ dummy1 ** 18,
-            .ex = "section .text\n" ++ "",
+        .{
+            .in = "section .text\n" ++
+                // long (max) line length
+                "mov ebp, 16 ; " ++ dummy32 ** 127 ++ dummy1 ** 17 ++ "\n" ++
+                // line byte limit overrun (line dropped)
+                "mov ebp, 16 ; " ++ dummy32 ** 127 ++ dummy1 ** 18,
+            .ex = "section .text\n" ++
+                "    mov     ebp, 16                     ; " ++ dummy32 ** 127 ++ dummy1 ** 17 ++ "\n",
         },
-        .{ // long (max) line length
-            .in = "section .text\n" ++ "mov ebp, 16 ; " ++ dummy32 ** 127 ++ dummy1 ** 17,
-            .ex = "section .text\n" ++ "    mov     ebp, 16                     ; " ++ dummy32 ** 127 ++ dummy1 ** 17 ++ "\n",
+        // individual token size limits (256)
+        .{
+            .in = "section .text\n" ++
+                // long token
+                "mov " ++ "A" ** 256 ++ "\n" ++
+                // token size overrun (line dropped)
+                "mov " ++ "A" ** 257,
+            .ex = "section .text\n" ++
+                "    mov     " ++ "A" ** 256 ++ "\n",
         },
         // FIXME: tests that specifically need to be moved to a different module
         // TODO: check that all aspects relevant to end-to-end testing covered in format.zig
         // ----------------
-        // FIXME: probably suitable for tokenizer (because of the presence of \t)
-        .{ // line with all 4
-            .in = "section .text\n" ++ " \t  my_label: mov eax,16; comment",
-            .ex = "section .text\n" ++ "my_label:   mov     eax, 16             ; comment\n",
-        },
-        // FIXME: move to tokenizer (
-        .{ // label and colon without whitespace
-            .in = "section .text\n" ++ "my_label:mov eax,16",
-            .ex = "section .text\n" ++ "my_label:   mov     eax, 16\n",
-        },
-        // FIXME: separate test for folding excess whitespace in non-string scope
-        //  context, may be suitable for tokenizer test (the section/directive
-        //  part of this not relevant for why i'm keeping this around)
-        .{
-            .in = "section .text\n" ++ " [ section  .text ] ",
-            .ex = "section .text\n" ++ "[section .text]\n",
-        },
         // FIXME: really need to move these tests to the appropriate place; starting
         //  to clash a little
         // TODO: also simplify these tests so that there's not unrelated extra
@@ -530,30 +541,34 @@ test "Format" {
         //  not affect the results of following ones
         // line token buffer limits (1024)
         .{ // line length token buffer overrun
-            .in = "section .text\n" ++ "mov eax, 16\nmov ebp, 16" ++ " [es:eax]" ** 256,
-            .ex = "section .text\n" ++ "    mov     eax, 16\n",
+            .in = "section .text\n" ++
+                "mov eax, 16\nmov ebp, 16" ++ " [es:eax]" ** 256,
+            .ex = "section .text\n" ++
+                "    mov     eax, 16\n",
         },
         .{ // long (max) line tokens
-            .in = "section .text\n" ++ "mov eax, 16\nmov ebp, 16" ++ " [es:eax]" ** 255,
-            .ex = "section .text\n" ++ "    mov     eax, 16\n    mov     ebp, 16" ++ " [es: eax]" ** 255 ++ "\n",
+            .in = "section .text\n" ++
+                "mov eax, 16\n" ++
+                "mov ebp, 16" ++ " [es:eax]" ** 255,
+            .ex = "section .text\n" ++
+                "    mov     eax, 16\n" ++
+                "    mov     ebp, 16" ++ " [es: eax]" ** 255 ++ "\n",
         },
         // line lexeme buffer limits (512)
         .{ // line length lexeme buffer overrun
-            .in = "section .text\n" ++ "mov eax, 16\nmov ebp, 16" ++ " a" ** 509,
-            .ex = "section .text\n" ++ "    mov     eax, 16\n",
+            .in = "section .text\n" ++
+                "mov eax, 16\n" ++
+                "mov ebp, 16" ++ " a" ** 509,
+            .ex = "section .text\n" ++
+                "    mov     eax, 16\n",
         },
         .{ // long (max) line lexemes
-            .in = "section .text\n" ++ "mov eax, 16\nmov ebp, 16" ++ " a" ** 508,
-            .ex = "section .text\n" ++ "    mov     eax, 16\n    mov     ebp, 16" ++ " a" ** 508 ++ "\n",
-        },
-        // individual token size limits (256)
-        .{ // token size overrun
-            .in = "section .text\n" ++ "mov " ++ "A" ** 257,
-            .ex = "section .text\n" ++ "",
-        },
-        .{ // long token
-            .in = "section .text\n" ++ "mov " ++ "A" ** 256,
-            .ex = "section .text\n" ++ "    mov     " ++ "A" ** 256 ++ "\n",
+            .in = "section .text\n" ++
+                "mov eax, 16\n" ++
+                "mov ebp, 16" ++ " a" ** 508,
+            .ex = "section .text\n" ++
+                "    mov     eax, 16\n" ++
+                "    mov     ebp, 16" ++ " a" ** 508 ++ "\n",
         },
     };
 
@@ -565,12 +580,13 @@ test "Format" {
         var output = std.ArrayList(u8).init(std.testing.allocator);
         defer output.deinit();
 
-        const f = fmt.Format(input.reader(), output.writer(), .{});
+        const result = fmt.Format(input.reader(), output.writer(), .{});
 
-        if (t.err) |ex_err| {
-            try std.testing.expectError(ex_err, f);
+        if (t.err) |e| {
+            try std.testing.expectError(e, result);
         } else {
-            const ex = if (t.ex) |ex| ex else t.in; // .ex null if input should not change
+            try result;
+            const ex = if (t.ex.len > 0) t.ex else t.in;
             try std.testing.expectEqualStrings(ex, output.items);
             try std.testing.expectEqual(ex.len, output.items.len);
         }

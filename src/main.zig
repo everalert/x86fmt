@@ -60,5 +60,6 @@ pub fn main() !void {
 
 test {
     _ = @import("format.zig");
+    _ = @import("token.zig");
     _ = @import("util.zig");
 }
