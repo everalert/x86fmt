@@ -161,8 +161,8 @@ pub fn Formatter(
 
                 Token.TokenizeUnicode(&line_tok, body, BUF_SIZE_TOK) catch break;
                 Lexeme.ParseTokens(&line_lex, line_tok.items) catch break;
-                Line.CtxParseMode(&line_ctx, line_lex.items, BUF_SIZE_TOK);
-                Line.CtxUpdateSection(&line_ctx, line_lex.items, &settings, BUF_SIZE_TOK);
+                Line.CtxParseMode(&line_ctx, line_lex.items);
+                Line.CtxUpdateSection(&line_ctx, line_lex.items, &settings);
 
                 switch (line_ctx.Mode) {
                     .AsmDirective,

@@ -33,10 +33,17 @@ pub const Context = struct {
 /// identifiers that can appear as first word on a directive line, including aliases
 const AssemblerDirective = enum {
     // zig fmt: off
-    bits, use16, use32, default, section, segment, absolute, @"extern", 
-    required, global, common, static, prefix, gprefix, lprefix, suffix, 
-    gsuffix, lsuffix, cpu, dollarhex, float, warning, list 
+    bits, use16, use32, default, section, segment, absolute, @"extern",
+    required, global, common, static, prefix, gprefix, lprefix, suffix,
+    gsuffix, lsuffix, cpu, dollarhex, float, warning, list,
     // zig fmt: on
+
+    pub fn AnyEqlIgnoreCase(cmp: []const u8) bool {
+        inline for (std.meta.fields(AssemblerDirective)) |f| {
+            if (std.ascii.eqlIgnoreCase(f.name, cmp)) return true;
+        }
+        return false;
+    }
 };
 
 const MacroNames = [_][]const u8{ "%macro", "%endmacro", "%imacro" };
@@ -51,7 +58,6 @@ const SectionTextSuffixes = [_][]const u8{"text"}; // yep
 pub fn CtxParseMode(
     ctx: *Context,
     lex: []const Lexeme,
-    comptime BUF_SIZE_TOK: usize,
 ) void {
     if (lex.len == 0) {
         ctx.Mode = .Blank;
@@ -59,25 +65,21 @@ pub fn CtxParseMode(
     }
 
     const tok = &lex[0].data[0];
-    assert(tok.data.len <= BUF_SIZE_TOK);
 
     ctx.Mode = switch (tok.kind) {
         .String => str: {
-            var case_buf: [BUF_SIZE_TOK]u8 = undefined;
-            const lowercase = std.ascii.lowerString(&case_buf, tok.data);
-
             for (MacroNames) |mn| {
                 if (mn.len != tok.data.len)
                     continue;
 
-                if (std.mem.eql(u8, mn, lowercase))
+                if (std.ascii.eqlIgnoreCase(mn, tok.data))
                     break :str .Macro;
             }
 
             if (tok.data[0] == '%')
                 break :str .PreProcDirective;
 
-            if (std.meta.stringToEnum(AssemblerDirective, lowercase) != null)
+            if (AssemblerDirective.AnyEqlIgnoreCase(tok.data))
                 break :str .AsmDirective;
 
             break :str .Source;
@@ -92,7 +94,6 @@ pub fn CtxUpdateSection(
     ctx: *Context,
     lex: []const Lexeme,
     fmt: *const FormatSettings,
-    comptime BUF_SIZE_TOK: usize,
 ) void {
     if (ctx.Mode != .AsmDirective) return;
 
@@ -113,25 +114,24 @@ pub fn CtxUpdateSection(
         break :tokens .{ &d1[0], &d2[0] };
     };
 
-    assert(tok1.data.len <= BUF_SIZE_TOK);
-    assert(tok2.data.len <= BUF_SIZE_TOK);
-    var case_buf: [BUF_SIZE_TOK]u8 = undefined;
+    // FIXME: token size should still be pervasively asserted as < 4096 due to
+    //  NASM requirements, need to check other places appropriate to assert
+    assert(tok1.data.len < 4096);
+    assert(tok2.data.len < 4096);
 
-    const directive = std.ascii.lowerString(&case_buf, tok1.data);
-    if (!std.mem.eql(u8, directive, "section")) return;
+    if (!std.ascii.eqlIgnoreCase(tok1.data, "section")) return;
 
     defer CtxUpdateColumns(ctx, fmt);
 
-    const section = std.ascii.lowerString(&case_buf, tok2.data);
-    if (!std.mem.startsWith(u8, section, ".")) {
+    if (!std.mem.startsWith(u8, tok2.data, ".")) {
         ctx.Section = .Other;
         return;
     }
-    for (SectionTextSuffixes) |suf| if (std.mem.endsWith(u8, section, suf)) {
+    for (SectionTextSuffixes) |suf| if (std.ascii.endsWithIgnoreCase(tok2.data, suf)) {
         ctx.Section = .Text;
         return;
     };
-    for (SectionDataSuffixes) |suf| if (std.mem.endsWith(u8, section, suf)) {
+    for (SectionDataSuffixes) |suf| if (std.ascii.endsWithIgnoreCase(tok2.data, suf)) {
         ctx.Section = .Data;
         return;
     };
