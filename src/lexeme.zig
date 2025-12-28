@@ -10,6 +10,8 @@ const PadSpaces = @import("util.zig").PadSpaces;
 
 pub const Kind = enum(u8) { None, Word, Separator };
 
+pub const Error = error{CapacityExceeded};
+
 pub const Opts = packed struct(u32) {
     bToLower: bool = false,
     bHeadToLower: bool = false,
@@ -27,7 +29,7 @@ const ScopeCloser = ")]}";
 pub fn ParseTokens(
     out: *std.ArrayListUnmanaged(Lexeme),
     tok: []const Token,
-) error{CapacityExceeded}!void {
+) Error!void {
     var scope: ?u8 = null;
     var start_i: usize = 0;
     for (tok, 0..) |t, i| {
@@ -42,7 +44,7 @@ pub fn ParseTokens(
         };
 
         switch (t.kind) {
-            .None, .Whitespace, .Comment => unreachable,
+            .None, .Comment => unreachable,
             .Scope => {
                 if (scope != null) {
                     const ci = std.mem.indexOfScalar(u8, ScopeCloser, t.data[0]);
@@ -70,6 +72,68 @@ pub fn ParseTokens(
         }
     }
 }
+
+// FIXME: not much to do here because there aren't that many token types, will
+//  need to expand once there is a "real" lexer
+test "Parse" {
+    const ParserTestCase = struct {
+        in: []const Token,
+        ex: []const Lexeme = &[_]Lexeme{},
+        err: ?Error = null,
+    };
+
+    const test_cases = [_]ParserTestCase{
+        blk: {
+            // word word
+            const in = &[_]Token{
+                .{ .kind = .String, .data = "dword1" },
+                .{ .kind = .String, .data = "dword2" },
+            };
+            const ex = &[_]Lexeme{
+                .{ .kind = .Word, .data = in[0..1] }, // dword1
+                .{ .kind = .Word, .data = in[1..2] }, // dword2
+            };
+            break :blk .{ .in = in, .ex = ex };
+        },
+        blk: {
+            // word scope(word)
+            const in = &[_]Token{
+                .{ .kind = .String, .data = "dword" },
+                .{ .kind = .Scope, .data = "[" },
+                .{ .kind = .String, .data = "eax" },
+                .{ .kind = .MathOp, .data = "+" },
+                .{ .kind = .String, .data = "ebp" },
+                .{ .kind = .Scope, .data = "]" },
+            };
+            const ex = &[_]Lexeme{
+                .{ .kind = .Word, .data = in[0..1] }, // dword
+                .{ .kind = .Word, .data = in[1..6] }, // [eax+ebp]
+            };
+            break :blk .{ .in = in, .ex = ex };
+        },
+    };
+
+    std.testing.log_level = .debug;
+    for (test_cases, 0..) |t, i| {
+        errdefer std.debug.print("FAILED {d:0>2}\n\n", .{i});
+
+        var output = try std.ArrayListUnmanaged(Lexeme).initCapacity(std.testing.allocator, t.ex.len);
+        defer output.deinit(std.testing.allocator);
+
+        const result = ParseTokens(&output, t.in);
+
+        if (t.err) |e| {
+            try std.testing.expectError(e, result);
+        } else {
+            try result;
+            try std.testing.expectEqual(t.ex.len, output.items.len);
+            try std.testing.expectEqualDeep(t.ex, output.items);
+        }
+    }
+}
+
+// FIXME: add tests for writer output, once again probably after "real" lexer
+//  implemented because the behaviour heavily depends on tokenization stage
 
 /// appends the contents of a lexeme to a byte array, advancing the provided
 /// utf-8 codepoint counter

@@ -55,6 +55,8 @@ const SectionKind = enum { None, Text, Data, Other };
 const SectionDataSuffixes = [_][]const u8{ "bss", "data", "tls" }; // also: data1, tls$
 const SectionTextSuffixes = [_][]const u8{"text"}; // yep
 
+// FIXME: for future: logic here belongs in parser, this should just switch
+//  purely on token/node kind
 pub fn CtxParseMode(
     ctx: *Context,
     lex: []const Lexeme,
@@ -85,7 +87,6 @@ pub fn CtxParseMode(
             break :str .Source;
         },
         .Scope => BLSELE(tok.data[0] == '[', Mode, .AsmDirective, .Unknown),
-        .Whitespace => unreachable, // token sequence should be pre-stripped
         else => .Unknown,
     };
 }

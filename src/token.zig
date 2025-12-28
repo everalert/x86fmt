@@ -6,7 +6,8 @@ const assert = std.debug.assert;
 const BLOR = @import("util.zig").BLOR;
 const BLAND = @import("util.zig").BLAND;
 
-pub const Kind = enum(u8) { None, Whitespace, String, Comment, MathOp, Scope, Comma, Backslash };
+// TODO: differentiate string vs identifier (vs directive, etc.)
+pub const Kind = enum(u8) { None, String, Comment, MathOp, Scope, Comma, Backslash };
 
 pub const Error = error{ CapacityExceeded, TokenSizeExceeded };
 

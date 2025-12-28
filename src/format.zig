@@ -273,7 +273,8 @@ test "Format" {
     //    \\		at ScreenFont.AdvanceY,		db 16
     //    \\		at ScreenFont.pGlyphs,		dd GlyphsTitle
     //    \\	iend
-    // TODO: non-scoped math statements without separating spaces ??
+    // TODO: non-scoped math statements without separating spaces ?? the examples
+    //  below would need 'equ' to be recognised by lexer as self-contained
     //    ATTACH_PARENT_PROCESS           equ -1
     //    ATTACH_PARENT_PROCESS_ADDR      equ $-ATTACH_PARENT_PROCESS
     //
@@ -542,32 +543,25 @@ test "Format" {
         // line token buffer limits (1024)
         .{ // line length token buffer overrun
             .in = "section .text\n" ++
-                "mov eax, 16\nmov ebp, 16" ++ " [es:eax]" ** 256,
-            .ex = "section .text\n" ++
-                "    mov     eax, 16\n",
+                "mov ebp, 16" ++ " [es:eax]" ** 256,
+            .ex = "section .text\n",
         },
         .{ // long (max) line tokens
             .in = "section .text\n" ++
-                "mov eax, 16\n" ++
                 "mov ebp, 16" ++ " [es:eax]" ** 255,
             .ex = "section .text\n" ++
-                "    mov     eax, 16\n" ++
                 "    mov     ebp, 16" ++ " [es: eax]" ** 255 ++ "\n",
         },
         // line lexeme buffer limits (512)
         .{ // line length lexeme buffer overrun
             .in = "section .text\n" ++
-                "mov eax, 16\n" ++
                 "mov ebp, 16" ++ " a" ** 509,
-            .ex = "section .text\n" ++
-                "    mov     eax, 16\n",
+            .ex = "section .text\n",
         },
         .{ // long (max) line lexemes
             .in = "section .text\n" ++
-                "mov eax, 16\n" ++
                 "mov ebp, 16" ++ " a" ** 508,
             .ex = "section .text\n" ++
-                "    mov     eax, 16\n" ++
                 "    mov     ebp, 16" ++ " a" ** 508 ++ "\n",
         },
     };
