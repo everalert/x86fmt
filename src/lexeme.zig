@@ -6,7 +6,6 @@ const assert = std.debug.assert;
 const Token = @import("token.zig");
 const BLAND = @import("util.zig").BLAND;
 const BLOR = @import("util.zig").BLOR;
-const PadSpaces = @import("util.zig").PadSpaces;
 
 pub const Kind = enum(u8) { None, Word, Separator };
 
@@ -198,7 +197,7 @@ pub fn BufAppendSlice(
     var prev_kind: Lexeme.Kind = .None;
     for (lexemes, 0..) |*lex, li| {
         if (BLAND(li > 0, BLAND(lex.kind != .Separator, prev_kind != .Separator)))
-            try PadSpaces(writer, i.*, 1);
+            try writer.context.PadSpaces(i.*, 1);
         try BufAppendOpts(writer, lex, i, opts, BUF_SIZE_TOK);
         prev_kind = lex.kind;
     }

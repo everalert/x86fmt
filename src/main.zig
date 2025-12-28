@@ -63,4 +63,5 @@ test {
     _ = @import("token.zig");
     _ = @import("lexeme.zig");
     _ = @import("util.zig");
+    _ = @import("utf8_line_measuring_writer.zig");
 }

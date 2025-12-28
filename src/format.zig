@@ -13,8 +13,7 @@ const BLOR = @import("util.zig").BLOR;
 const IBLXOR = @import("util.zig").IBLXOR;
 const BLSEL = @import("util.zig").BLSEL;
 const BLSELE = @import("util.zig").BLSELE;
-const PadSpaces = @import("util.zig").PadSpaces;
-const utf8LineMeasuringWriter = @import("util.zig").utf8LineMeasuringWriter;
+const utf8LineMeasuringWriter = @import("utf8_line_measuring_writer.zig").utf8LineMeasuringWriter;
 
 pub const Settings = struct {
     TabSize: usize = 4,
@@ -72,8 +71,8 @@ pub fn Formatter(
         ) !void {
             var line_tok = std.ArrayListUnmanaged(Token).initBuffer(&TokBufLine);
             var line_lex = std.ArrayListUnmanaged(Lexeme).initBuffer(&LexBufLine);
-            var out_stream = utf8LineMeasuringWriter(writer);
-            const out_w = out_stream.writer();
+            var out = utf8LineMeasuringWriter(writer);
+            const out_w = out.writer();
 
             var line_ctx = std.mem.zeroes(Line.Context);
             line_ctx.Mode = .Blank;
@@ -152,8 +151,8 @@ pub fn Formatter(
                 // TODO: smart comment positioning based on prev/next lines
                 if (BLAND(body.len == 0, comment.len > 0)) {
                     const colcom = @max(line_ctx_prev.ActualColCom, line_ctx_prev.ActualColFirst);
-                    PadSpaces(out_w, colcom, 0) catch break;
-                    line_ctx.ActualColCom = out_stream.line_len;
+                    out.PadSpaces(colcom, 0) catch break;
+                    line_ctx.ActualColCom = out.LineLen;
                     _ = out_w.write(comment) catch break;
                     _ = out_w.write(line_ctx.NewLineStr) catch break;
                     continue;
@@ -176,12 +175,12 @@ pub fn Formatter(
 
                 // NOTE: assumes the comment slice will contain the leading semicolon
                 if (comment.len > 0) {
-                    PadSpaces(out_w, line_ctx.ColCom, 1) catch break;
-                    line_ctx.ActualColCom = out_stream.line_len;
+                    out.PadSpaces(line_ctx.ColCom, 1) catch break;
+                    line_ctx.ActualColCom = out.LineLen;
                     _ = out_w.write(comment) catch break;
                 }
 
-                line_ctx.ActualColFirst = out_stream.line_lws;
+                line_ctx.ActualColFirst = out.LineLws;
                 _ = out_w.write(line_ctx.NewLineStr) catch break;
             }
         }
@@ -203,19 +202,19 @@ pub fn Formatter(
                     .Label => ls: {
                         const t_len = lex[0].data[0].data.len;
                         b_label = lex[0].data[0].data[t_len - 1] == ':';
-                        try PadSpaces(writer, BLSEL(b_label, usize, ctx.ColLab, ctx.ColIns), 0);
+                        try writer.context.PadSpaces(BLSEL(b_label, usize, ctx.ColLab, ctx.ColIns), 0);
                         const next_s = BLSELE(b_label, Line.State, .Instruction, .Operands);
 
                         try Lexeme.BufAppend(writer, &lex[fmtgen_i], &fmtgen_i, BUF_SIZE_TOK);
                         break :ls next_s;
                     },
                     .Instruction => ls: {
-                        try PadSpaces(writer, BLSEL(b_label, usize, ctx.ColLabIns, ctx.ColIns), 1);
+                        try writer.context.PadSpaces(BLSEL(b_label, usize, ctx.ColLabIns, ctx.ColIns), 1);
                         try Lexeme.BufAppend(writer, &lex[fmtgen_i], &fmtgen_i, BUF_SIZE_TOK);
                         break :ls .Operands;
                     },
                     .Operands => ls: {
-                        try PadSpaces(writer, BLSEL(b_label, usize, ctx.ColLabOps, ctx.ColOps), 1);
+                        try writer.context.PadSpaces(BLSEL(b_label, usize, ctx.ColLabOps, ctx.ColOps), 1);
                         try Lexeme.BufAppendSlice(writer, lex[fmtgen_i..], &fmtgen_i, .{}, BUF_SIZE_TOK);
                         break :ls .Comment;
                     },
@@ -232,7 +231,7 @@ pub fn Formatter(
             ctx: *const Line.Context,
         ) !void {
             var fmtgen_i: usize = 0;
-            try PadSpaces(writer, ctx.ColLab, 0);
+            try writer.context.PadSpaces(ctx.ColLab, 0);
             try Lexeme.BufAppendOpts(writer, &lex[0], &fmtgen_i, .{ .bHeadToLower = true }, BUF_SIZE_TOK);
             if (lex.len > 1) {
                 try writer.writeByte(' ');
