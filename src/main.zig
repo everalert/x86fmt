@@ -27,6 +27,7 @@ test {
     _ = @import("format.zig");
     _ = @import("token.zig");
     _ = @import("lexeme.zig");
-    _ = @import("util.zig");
-    _ = @import("utf8_line_measuring_writer.zig");
+    _ = @import("utl_branchless.zig");
+    _ = @import("utl_cli.zig");
+    _ = @import("utl_utf8_line_measuring_writer.zig");
 }

@@ -3,8 +3,8 @@ const Token = @This();
 const std = @import("std");
 const assert = std.debug.assert;
 
-const BLOR = @import("util.zig").BLOR;
-const BLAND = @import("util.zig").BLAND;
+const BLOR = @import("utl_branchless.zig").BLOR;
+const BLAND = @import("utl_branchless.zig").BLAND;
 
 // TODO: differentiate string vs identifier (vs directive, etc.)
 pub const Kind = enum(u8) { None, String, Comment, MathOp, Scope, Comma, Backslash };

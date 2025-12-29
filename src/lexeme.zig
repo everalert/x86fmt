@@ -4,8 +4,8 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const Token = @import("token.zig");
-const BLAND = @import("util.zig").BLAND;
-const BLOR = @import("util.zig").BLOR;
+const BLAND = @import("utl_branchless.zig").BLAND;
+const BLOR = @import("utl_branchless.zig").BLOR;
 
 pub const Kind = enum(u8) { None, Word, Separator };
 

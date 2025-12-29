@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const eql = std.mem.eql;
 
-const BLAND = @import("util.zig").BLAND;
+const BLAND = @import("utl_branchless.zig").BLAND;
 
 // all helpers return whether they got a "hit" on a cli flag, indicating that the
 // parsing loop can short circuit

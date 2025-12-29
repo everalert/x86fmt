@@ -2,18 +2,18 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
-const CLI = @import("util_cli.zig");
+const CLI = @import("utl_cli.zig");
 const Token = @import("token.zig");
 const Lexeme = @import("lexeme.zig");
 const Line = @import("line.zig");
 
-const BLAND = @import("util.zig").BLAND;
-const IBLAND = @import("util.zig").IBLAND;
-const BLOR = @import("util.zig").BLOR;
-const IBLXOR = @import("util.zig").IBLXOR;
-const BLSEL = @import("util.zig").BLSEL;
-const BLSELE = @import("util.zig").BLSELE;
-const utf8LineMeasuringWriter = @import("utf8_line_measuring_writer.zig").utf8LineMeasuringWriter;
+const BLAND = @import("utl_branchless.zig").BLAND;
+const IBLAND = @import("utl_branchless.zig").IBLAND;
+const BLOR = @import("utl_branchless.zig").BLOR;
+const IBLXOR = @import("utl_branchless.zig").IBLXOR;
+const BLSEL = @import("utl_branchless.zig").BLSEL;
+const BLSELE = @import("utl_branchless.zig").BLSELE;
+const utf8LineMeasuringWriter = @import("utl_utf8_line_measuring_writer.zig").utf8LineMeasuringWriter;
 
 pub const Settings = struct {
     TabSize: usize = 4,
