@@ -58,7 +58,7 @@ pub fn utf8LineMeasuringWriter(child_stream: anytype) Utf8LineMeasuringWriter(@T
     return .{ .LineLen = 0, .LineLws = 0, .child_stream = child_stream };
 }
 
-test Utf8LineMeasuringWriter {
+test "Utf8LineMeasuringWriter" {
     // no newline
     var line_measuring_stream = utf8LineMeasuringWriter(std.io.null_writer);
     const stream = line_measuring_stream.writer();

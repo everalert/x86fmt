@@ -140,10 +140,10 @@ pub fn CtxUpdateSection(
 
 pub fn CtxUpdateColumns(ctx: *Context, fmt: *const FormatSettings) void {
     const base = switch (ctx.Section) {
-        .None => fmt.SectionIndentNone,
-        .Text => fmt.SectionIndentText,
-        .Other => fmt.SectionIndentOther,
-        .Data => fmt.SectionIndentData,
+        .None => fmt.SecIndentNone,
+        .Text => fmt.SecIndentText,
+        .Other => fmt.SecIndentOther,
+        .Data => fmt.SecIndentData,
     };
     const com_col, const ops_min_adv, const ins_min_adv = switch (ctx.Section) {
         .Data, .None => .{ fmt.DataComCol, fmt.DataOpsMinAdv, fmt.DataInsMinAdv },

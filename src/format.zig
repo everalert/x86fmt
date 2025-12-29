@@ -2,7 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
-const CLI = @import("cli.zig");
+const CLI = @import("util_cli.zig");
 const Token = @import("token.zig");
 const Lexeme = @import("lexeme.zig");
 const Line = @import("line.zig");
@@ -40,10 +40,10 @@ pub const Settings = struct {
 
     /// Base indentation for different section contexts (e.g. "section .data").
     /// Other offsets are added to these depending on the section type.
-    SectionIndentNone: usize = 0,
-    SectionIndentData: usize = 0,
-    SectionIndentText: usize = 0,
-    SectionIndentOther: usize = 0,
+    SecIndentNone: usize = 0,
+    SecIndentData: usize = 0,
+    SecIndentText: usize = 0,
+    SecIndentOther: usize = 0,
 };
 
 pub fn Formatter(
@@ -262,6 +262,9 @@ test "Format" {
         err: ?fmt.Error = null,
     };
 
+    // TODO: auto-completing scopes at end of line when scope ender not present
+    //  "unclosed string  ->  "unclosed string"
+    //  (unclosed paren   ->  (unclosed paren)
     // TODO: complex nested alignment
     //    \\section .data
     //    \\	FontTitle:

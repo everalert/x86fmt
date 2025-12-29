@@ -1,15 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const assert = std.debug.assert;
 
-const CLI = @import("cli.zig");
-const Formatter = @import("format.zig").Formatter;
-const BLAND = @import("util.zig").BLAND;
-
-const BUF_SIZE_LINE_IO = 4096; // NOTE: meant to be 4095; std bug in Reader.readUntilDelimiterOrEof
-const BUF_SIZE_LINE_TOK = 1024;
-const BUF_SIZE_LINE_LEX = 512;
-const BUF_SIZE_TOK = 256;
+const App = @import("app.zig");
 
 var mem: [4096]u8 = undefined;
 
@@ -18,47 +10,20 @@ var mem: [4096]u8 = undefined;
 pub fn main() !void {
     var fba = std.heap.FixedBufferAllocator.init(&mem);
     const alloc = fba.allocator();
-    const cli = CLI.Parse(alloc) catch return;
 
-    if (cli.bShowHelp) {
-        var stdo = std.io.getStdOut();
-        _ = try stdo.write(CLI.HelpText);
-        return;
-    }
+    var arg_it = try std.process.argsWithAllocator(alloc);
+    defer arg_it.deinit();
+    _ = arg_it.next();
 
-    {
-        const fi = switch (cli.IKind) {
-            .File => try std.fs.cwd().openFile(cli.IFile, .{}),
-            .Console => c: {
-                const c = std.io.getStdIn();
-                if (BLAND(!cli.bAllowTty, c.isTty())) {
-                    var stdo = std.io.getStdOut();
-                    _ = try stdo.write(CLI.HelpTextShort);
-                    return;
-                }
-                break :c c;
-            },
-        };
-        defer fi.close();
-        var br = std.io.bufferedReader(fi.reader());
+    const stdi = std.io.getStdIn();
+    const stdo = std.io.getStdOut();
 
-        const fo = switch (cli.OKind) {
-            .File => try std.fs.cwd().createFile(cli.OFile, .{}),
-            .Console => std.io.getStdOut(),
-        };
-        defer fo.close();
-        var bw = std.io.bufferedWriter(fo.writer());
-        defer bw.flush() catch {};
-
-        const fmt = Formatter(BUF_SIZE_LINE_IO, BUF_SIZE_LINE_TOK, BUF_SIZE_LINE_LEX, BUF_SIZE_TOK);
-        fmt.Format(br.reader(), bw.writer(), cli.FmtSettings) catch {};
-    }
-
-    if (cli.bIOFileSame)
-        try std.fs.cwd().rename(cli.OFile, cli.IFile);
+    return App.Main(alloc, &arg_it, stdi, stdo);
 }
 
 test {
+    _ = @import("app.zig");
+    _ = @import("app_settings.zig");
     _ = @import("format.zig");
     _ = @import("token.zig");
     _ = @import("lexeme.zig");
