@@ -133,8 +133,8 @@ const def_settings = AppSettings{
     .bIOFileSame = false,
     .IKind = .Console,
     .OKind = .Console,
-    .IFile = &[_]u8{},
-    .OFile = &[_]u8{},
+    .IFile = &.{},
+    .OFile = &.{},
 };
 
 const Waiters = struct {
@@ -170,8 +170,8 @@ const Waiters = struct {
 pub fn ParseCLI(alloc: Allocator, args: anytype) !AppSettings {
     var i_kind: ?IOKind = null;
     var o_kind: ?IOKind = null;
-    var i_file: []const u8 = &[_]u8{};
-    var o_file: []const u8 = &[_]u8{};
+    var i_file: []const u8 = &.{};
+    var o_file: []const u8 = &.{};
     var b_allow_tty = false;
     var b_show_help = false;
     var b_io_file_same = false;
@@ -186,7 +186,7 @@ pub fn ParseCLI(alloc: Allocator, args: anytype) !AppSettings {
         //  that does the two-stage option in a unified way and just skips if the
         //  option is already set
         const fo = EnumCheckOnce(arg, &.{"-fo"}, IOKind, .File, &o_kind);
-        if (StageTwoCheck(alloc, arg, fo, []const u8, &o_file, &[_]u8{}, &waiters.fo))
+        if (StageTwoCheck(alloc, arg, fo, []const u8, &o_file, &.{}, &waiters.fo))
             continue;
         if (EnumCheckOnce(arg, &.{"-co"}, IOKind, .Console, &o_kind))
             continue;

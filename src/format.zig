@@ -258,10 +258,15 @@ test "Format" {
 
     const FormatTestCase = struct {
         in: []const u8,
-        ex: []const u8 = &[_]u8{},
+        ex: []const u8 = &.{},
         err: ?fmt.Error = null,
     };
 
+    // TODO: use reference files as input. the following is semi-prepared but
+    //  editing not yet final:
+    //  - test/fmt.base.s
+    //  - test/fmt.default.s
+    //  - test/fmt.all.s
     // TODO: auto-completing scopes at end of line when scope ender not present
     //  "unclosed string  ->  "unclosed string"
     //  (unclosed paren   ->  (unclosed paren)

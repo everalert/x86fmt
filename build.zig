@@ -15,7 +15,12 @@ comptime {
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+    build_exe(b, target, optimize);
+    build_step_tests(b, target, optimize);
+    build_step_cleanup(b);
+}
 
+fn build_exe(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {
     const module_opts = .{ .target = target, .optimize = optimize };
     const zbench_module = b.dependency("zbench", module_opts).module("zbench");
 
@@ -27,23 +32,37 @@ pub fn build(b: *std.Build) void {
     });
     exe.root_module.addImport("zbench", zbench_module);
     b.installArtifact(exe);
+}
 
-    // TESTING
+fn build_step_tests(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {
+    const test_step = b.step("test", "Run unit tests");
 
-    const exe_unit_tests = b.addTest(.{
+    const testfiles = [_]struct { []const u8, std.Build.Module.CreateOptions }{
+        .{ "testfile_app_all", .{ .root_source_file = b.path("testing/app.all.s") } },
+        .{ "testfile_app_base", .{ .root_source_file = b.path("testing/app.base.s") } },
+        .{ "testfile_app_default", .{ .root_source_file = b.path("testing/app.default.s") } },
+        .{ "testfile_fmt_all", .{ .root_source_file = b.path("testing/fmt.all.s") } },
+        .{ "testfile_fmt_base", .{ .root_source_file = b.path("testing/fmt.base.s") } },
+        .{ "testfile_fmt_default", .{ .root_source_file = b.path("testing/fmt.default.s") } },
+    };
+
+    const tests_compile = b.addTest(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
-    exe_unit_tests.root_module.addImport("zbench", zbench_module);
-    const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_exe_unit_tests.step);
+    for (testfiles) |testfile|
+        tests_compile.root_module.addAnonymousImport(testfile[0], testfile[1]);
 
-    // CLEANUP
+    const tests_run = b.addRunArtifact(tests_compile);
 
+    test_step.dependOn(&tests_run.step);
+}
+
+fn build_step_cleanup(b: *std.Build) void {
     const clean_step = b.step("clean", "Clean up");
+
     clean_step.dependOn(&b.addRemoveDirTree(b.install_path).step);
     if (@import("builtin").os.tag != .windows) {
         clean_step.dependOn(&b.addRemoveDirTree(b.pathFromRoot(".zig-cache")).step);

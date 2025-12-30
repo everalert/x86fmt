@@ -59,6 +59,10 @@ pub fn Main(alloc: Allocator, args: anytype, stdi: anytype, stdo: anytype) !void
 // FIXME: add tests
 test "App Main" {
     //@compileError("TODO: App Main tests");
+    // TODO: finalize editing of reference files: (remove each from list when done)
+    //  - test/app.base.s
+    //  - test/app.default.s
+    //  - test/app.all.s
 
     // TODO: tests for each case with both default settings (unchanged input) and
     //  all settings changed. general strategy that avoids "risking" repo test

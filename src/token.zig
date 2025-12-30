@@ -12,7 +12,7 @@ pub const Kind = enum(u8) { None, String, Comment, MathOp, Scope, Comma, Backsla
 pub const Error = error{ CapacityExceeded, TokenSizeExceeded };
 
 kind: Kind = .None,
-data: []const u8 = &[_]u8{},
+data: []const u8 = &.{},
 
 pub fn TokenizeUnicode(
     out: *std.ArrayListUnmanaged(Token),
