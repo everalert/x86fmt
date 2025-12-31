@@ -3,9 +3,9 @@ const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 
 const CLI = @import("utl_cli.zig");
-const Token = @import("token.zig");
-const Lexeme = @import("lexeme.zig");
-const Line = @import("line.zig");
+const Token = @import("fmt_token.zig");
+const Lexeme = @import("fmt_lexeme.zig");
+const Line = @import("fmt_line.zig");
 
 const BLAND = @import("utl_branchless.zig").BLAND;
 const IBLAND = @import("utl_branchless.zig").IBLAND;

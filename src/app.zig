@@ -4,7 +4,7 @@ const File = std.fs.File;
 const assert = std.debug.assert;
 
 const AppSettings = @import("app_settings.zig");
-const Formatter = @import("format.zig").Formatter;
+const Formatter = @import("fmt.zig").Formatter;
 const BLAND = @import("utl_branchless.zig").BLAND;
 
 const BUF_SIZE_LINE_IO = 4096; // NOTE: meant to be 4095; std bug in Reader.readUntilDelimiterOrEof

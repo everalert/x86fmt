@@ -24,9 +24,10 @@ pub fn main() !void {
 test {
     _ = @import("app.zig");
     _ = @import("app_settings.zig");
-    _ = @import("format.zig");
-    _ = @import("token.zig");
-    _ = @import("lexeme.zig");
+    _ = @import("fmt.zig");
+    _ = @import("fmt_token.zig");
+    _ = @import("fmt_lexeme.zig");
+    _ = @import("fmt_line.zig");
     _ = @import("utl_branchless.zig");
     _ = @import("utl_cli.zig");
     _ = @import("utl_utf8_line_measuring_writer.zig");

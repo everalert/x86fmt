@@ -21,7 +21,7 @@ const EnumCheckOnce = @import("utl_cli.zig").EnumCheckOnce;
 const BoolCheckOnce = @import("utl_cli.zig").BoolCheckOnce;
 const RawCheck = @import("utl_cli.zig").RawCheck;
 
-const FormatSettings = @import("format.zig").Settings;
+const FormatSettings = @import("fmt.zig").Settings;
 const VERSION_STRING = @import("app_version.zig").VERSION_STRING;
 
 // TODO: ?? accept input file without tag only if in first position, and require

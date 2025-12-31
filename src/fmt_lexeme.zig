@@ -3,7 +3,7 @@ const Lexeme = @This();
 const std = @import("std");
 const assert = std.debug.assert;
 
-const Token = @import("token.zig");
+const Token = @import("fmt_token.zig");
 const BLAND = @import("utl_branchless.zig").BLAND;
 const BLOR = @import("utl_branchless.zig").BLOR;
 

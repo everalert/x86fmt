@@ -3,9 +3,9 @@ const Line = @This();
 const std = @import("std");
 const assert = std.debug.assert;
 
-const FormatSettings = @import("format.zig").Settings;
-const Lexeme = @import("lexeme.zig");
-const Token = @import("token.zig");
+const FormatSettings = @import("fmt.zig").Settings;
+const Lexeme = @import("fmt_lexeme.zig");
+const Token = @import("fmt_token.zig");
 const BLOR = @import("utl_branchless.zig").BLOR;
 const BLSELE = @import("utl_branchless.zig").BLSELE;
 
