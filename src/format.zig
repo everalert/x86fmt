@@ -158,8 +158,18 @@ pub fn Formatter(
                     continue;
                 }
 
-                Token.TokenizeUnicode(&line_tok, body, BUF_SIZE_TOK) catch break;
-                Lexeme.ParseTokens(&line_lex, line_tok.items) catch break;
+                Token.TokenizeUnicode(&line_tok, body, BUF_SIZE_TOK) catch {
+                    _ = out_w.write(line_s) catch break;
+                    _ = out_w.write("\n") catch break;
+                    continue;
+                };
+
+                Lexeme.ParseTokens(&line_lex, line_tok.items) catch {
+                    _ = out_w.write(line_s) catch break;
+                    _ = out_w.write("\n") catch break;
+                    continue;
+                };
+
                 Line.CtxParseMode(&line_ctx, line_lex.items);
                 Line.CtxUpdateSection(&line_ctx, line_lex.items, &settings);
 
@@ -550,6 +560,7 @@ test "Format" {
         },
         // pass through invalid utf-8 without formatting
         // https://stackoverflow.com/a/3886015
+        // FIXME: notify unformatted line via stderr
         .{
             .in = "section .text\n" ++
                 // invalid utf8 (codepoint malformed)
@@ -572,14 +583,16 @@ test "Format" {
                 "    mov     ebp, 16                     ; " ++ dummy32 ** 127 ++ dummy1 ** 17 ++ "\n",
         },
         // individual token size limits (256)
+        // FIXME: notify unformatted line via stderr
         .{
             .in = "section .text\n" ++
                 // long token
                 "mov " ++ "A" ** 256 ++ "\n" ++
-                // token size overrun (line dropped)
+                // token size overrun (line dumped verbatim)
                 "mov " ++ "A" ** 257,
             .ex = "section .text\n" ++
-                "    mov     " ++ "A" ** 256 ++ "\n",
+                "    mov     " ++ "A" ** 256 ++ "\n" ++
+                "mov " ++ "A" ** 257 ++ "\n",
         },
         // FIXME: tests that specifically need to be moved to a different module
         // TODO: check that all aspects relevant to end-to-end testing covered in format.zig
@@ -591,10 +604,13 @@ test "Format" {
         // TODO: that said, do need some tests to confirm the previous lines do
         //  not affect the results of following ones
         // line token buffer limits (1024)
-        .{ // line length token buffer overrun
+        .{
+            // line length token buffer overrun (line dumped verbatim)
+            // FIXME: notify unformatted line via stderr
             .in = "section .text\n" ++
                 "mov ebp, 16" ++ " [es:eax]" ** 256,
-            .ex = "section .text\n",
+            .ex = "section .text\n" ++
+                "mov ebp, 16" ++ " [es:eax]" ** 256 ++ "\n",
         },
         .{ // long (max) line tokens
             .in = "section .text\n" ++
@@ -603,10 +619,13 @@ test "Format" {
                 "    mov     ebp, 16" ++ " [es: eax]" ** 255 ++ "\n",
         },
         // line lexeme buffer limits (512)
-        .{ // line length lexeme buffer overrun
+        .{
+            // line length lexeme buffer overrun (line dumped verbatim)
+            // FIXME: notify unformatted line via stderr
             .in = "section .text\n" ++
                 "mov ebp, 16" ++ " a" ** 509,
-            .ex = "section .text\n",
+            .ex = "section .text\n" ++
+                "mov ebp, 16" ++ " a" ** 509 ++ "\n",
         },
         .{ // long (max) line lexemes
             .in = "section .text\n" ++
