@@ -272,6 +272,7 @@ test "Format" {
         err: ?fmt.Error = null,
     };
 
+    // TODO: check that all aspects relevant to end-to-end testing covered in format.zig
     // TODO: use reference files as input. the following is semi-prepared but
     //  editing not yet final:
     //  - test/fmt.base.s
@@ -443,6 +444,7 @@ test "Format" {
         // ----------------
         // BOM
         .{
+            // FIXME: dump whole file raw instead of aborting?
             .in = &[_]u8{ 0xEF, 0xBB, 0xBF } ++ " \t  my_label: mov eax,16; comment",
             .err = fmt.Error.SourceContainsBOM,
         },
@@ -594,15 +596,6 @@ test "Format" {
                 "    mov     " ++ "A" ** 256 ++ "\n" ++
                 "mov " ++ "A" ** 257 ++ "\n",
         },
-        // FIXME: tests that specifically need to be moved to a different module
-        // TODO: check that all aspects relevant to end-to-end testing covered in format.zig
-        // ----------------
-        // FIXME: really need to move these tests to the appropriate place; starting
-        //  to clash a little
-        // TODO: also simplify these tests so that there's not unrelated extra
-        //  lines and such harming readability
-        // TODO: that said, do need some tests to confirm the previous lines do
-        //  not affect the results of following ones
         // line token buffer limits (1024)
         .{
             // line length token buffer overrun (line dumped verbatim)

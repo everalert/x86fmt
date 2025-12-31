@@ -154,3 +154,8 @@ pub fn CtxUpdateColumns(ctx: *Context, fmt: *const FormatSettings) void {
     ctx.ColLabIns = base + ins_min_adv;
     ctx.ColLabOps = base + ins_min_adv + ops_min_adv;
 }
+
+// FIXME: add tests
+//  - CtxParseMode
+//  - CtxUpdateSection
+//  - probably not necessary to test CtxUpdateColumns?
