@@ -38,12 +38,12 @@ fn build_step_tests(b: *std.Build, target: std.Build.ResolvedTarget, optimize: s
     const test_step = b.step("test", "Run unit tests");
 
     const testfiles = [_]struct { []const u8, std.Build.Module.CreateOptions }{
-        .{ "testfile_app_all", .{ .root_source_file = b.path("testing/app.all.s") } },
-        .{ "testfile_app_base", .{ .root_source_file = b.path("testing/app.base.s") } },
-        .{ "testfile_app_default", .{ .root_source_file = b.path("testing/app.default.s") } },
-        .{ "testfile_fmt_all", .{ .root_source_file = b.path("testing/fmt.all.s") } },
-        .{ "testfile_fmt_base", .{ .root_source_file = b.path("testing/fmt.base.s") } },
-        .{ "testfile_fmt_default", .{ .root_source_file = b.path("testing/fmt.default.s") } },
+        .{ "testfile_app_all", .{ .root_source_file = b.path("testing/app.all.asmtest") } },
+        .{ "testfile_app_base", .{ .root_source_file = b.path("testing/app.base.asmtest") } },
+        .{ "testfile_app_default", .{ .root_source_file = b.path("testing/app.default.asmtest") } },
+        .{ "testfile_fmt_all", .{ .root_source_file = b.path("testing/fmt.all.asmtest") } },
+        .{ "testfile_fmt_base", .{ .root_source_file = b.path("testing/fmt.base.asmtest") } },
+        .{ "testfile_fmt_default", .{ .root_source_file = b.path("testing/fmt.default.asmtest") } },
     };
 
     const tests_compile = b.addTest(.{

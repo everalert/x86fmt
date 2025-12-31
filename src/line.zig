@@ -124,10 +124,6 @@ pub fn CtxUpdateSection(
 
     defer CtxUpdateColumns(ctx, fmt);
 
-    if (!std.mem.startsWith(u8, tok2.data, ".")) {
-        ctx.Section = .Other;
-        return;
-    }
     for (SectionTextSuffixes) |suf| if (std.ascii.endsWithIgnoreCase(tok2.data, suf)) {
         ctx.Section = .Text;
         return;
@@ -136,6 +132,8 @@ pub fn CtxUpdateSection(
         ctx.Section = .Data;
         return;
     };
+
+    ctx.Section = .Other;
 }
 
 pub fn CtxUpdateColumns(ctx: *Context, fmt: *const FormatSettings) void {

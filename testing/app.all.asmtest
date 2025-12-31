@@ -1,0 +1,453 @@
+; WARNING: ONLY edit this file in an editor that does NOT format on save, as the
+;  entire point of this file is to provide customized reference formatting state
+;
+; test case for `app.zig` tests. data for this file is truncated and comes from:
+;   `001.s`             everalert/x86-experiments -> 001 -> main.s
+;   `005.s`             everalert/x86-experiments -> 005 -> main.s
+;   `vbuf_text.s`       everalert/x86-experiments -> 005 -> vbuf_text.s
+;   `win32.s`           everalert/x86-experiments -> 005 -> win32.s
+;   `reverse_string.s`  funnydman/nasm-assembly-examples -> x86_64/exercises/reverse_string.asm
+;
+; file parameters
+;   `app.base.s`        (no formatting, this is used for test input only)
+;   `app.default.s`     no cosmetic cli opts. equivalent to:
+;                           -ts 4 -mbl 2
+;                           -tcc 40 -tia 12 -toa 8
+;                           -dcc 60 -dia 16 -doa 32
+;                           -sin 0 -sid 0 -sit 0 -sio 0
+;   `app.all.s`         all cli opts set to non-default values
+;                           -ts 2 -mbl 1
+;                           -tcc 36 -tia 8 -toa 6
+;                           -dcc 72 -dia 20 -doa 36
+;                           -sin 2 -sid 4 -sit 6 -sio 8
+
+; some dummy data for no section context
+
+    NONE_SECTION_CONSTANT               equ 0
+
+  extern _NoneSectionImport@16                                          ; user32.dll
+
+  %macro NoneSectionMacro
+    xor                                 eax, eax
+  %endmacro
+
+; some dummy data for 'other' section context
+        section .definitely_not_a_normal_section
+
+          OTHER_SECTION_CONSTANT equ 0
+
+        extern _OtherSectionImport@16 ; user32.dll
+
+        %macro OtherSectionMacro
+          xor   eax, eax
+        %endmacro
+
+; 001.s
+; ----------------
+    section .data
+
+    extern _GetStdHandle@4                                              ; kernel32.dll
+
+; %1  error message string
+    %macro ShowErrorMessage 1
+      push                                MB_OK|MB_ICONEXCLAMATION
+    %endmacro
+
+; %1  string len
+; %2  string
+    %macro WriteConsole 2
+      push                                eax
+      push                                ecx
+      mov                                 ecx, %1
+      push                                ebx
+      mov                                 ebx, %2
+      push                                NULL                          ; lpVoidReserved
+      push                                StdOutCharsWritten            ; lpNumberOfCharsWritten
+      push                                ecx                           ; nNumberOfCharsToWrite
+      push                                ebx                           ; lpBuffer
+      push                                [HSTDOUT]                     ; hConsoleOutput
+      call                                _WriteConsoleA@20
+      cmp                                 eax, NULL
+      pop                                 ebx
+      pop                                 ecx
+      pop                                 eax
+      jnz                                 %%success
+      ShowErrorMessage                    str_err_write_console
+    %%success:
+    %endmacro
+
+    global _main
+
+    section .data
+    ; win32 constants
+      NULL                                equ 0
+      ATTACH_PARENT_PROCESS               equ - 1
+      ; our stuff
+      str_get_hinst                       db "Getting HINSTANCE", 10, 0
+      strlen_get_hinst                    dd $-str_get_hinst
+
+    section .bss
+    HINSTANCE:          resd                                1
+
+      section .text
+
+      _main:
+
+; convert 4-byte u32 value to hex string
+; fn htoa(val: u32, out: *[8]u8) callconv(.stdcall) void
+      htoa:
+        push  ebp
+        mov   ebp, esp
+        push  eax
+        push  ebx
+        push  ecx
+        push  edx
+        mov   ebx, [ebp+8]          ; val
+        mov   eax, [ebp+12]         ; out
+        mov   ecx, 8                ; ecx = i
+      htoa_it:
+        sub   ecx, 1
+        mov   edx, ebx              ; val
+        and   edx, 0xF
+        add   edx, 0x30             ; edx += '0' 
+        cmp   edx, 0x39
+        jle   htoa_it_out           ; char < A
+        add   edx, 0x07             ; edx += 'A'-':'
+      htoa_it_out:
+        mov   byte [eax+ecx], dl    ; out[i]
+        shr   ebx, 4                ; val >> 4
+        cmp   ecx, 0
+        jge   htoa_it
+        pop   edx
+        pop   ecx
+        pop   ebx
+        pop   eax
+        pop   ebp
+        ; NOTE: not sure why the following crashes
+        ;  add esp, 8
+        ;  ret
+        ret   8
+
+; 005.s
+; ----------------
+    section .data
+
+    global _main
+
+    %include "win32.s"
+
+      DefaultW                            equ 640
+      DefaultH                            equ 360
+      bPrintDebug                         equ 0
+      bPrintInWndProc                     equ 0
+
+    section .data
+
+      FrameTime                           dq 1.6666666666666666435370e-02
+
+      WavyTextTimescale                   dd 1.5
+      BgPulseOffsetBase                   dd 26                         ; 16+16/2
+
+      str_error                           db "Error!", 0
+      str_errmsg_format                   db "[ERROR] (00000000) ", 0   ; will be filled in and expanded by fn
+      strlen_errmsg_format                equ $-str_errmsg_format-1
+      strloc_errmsg_format_err            equ 9                         ; position of the start of the error code
+      str_get_hinst                       db "Getting HINSTANCE", 0
+      str_super                           db "SUPERCALIFRAGILISTICEXPIALIDOCIOUS", 0
+
+    section .bss
+
+      AppDuration                         resq 1
+
+    ModuleHandle:       resd                                1
+    WindowSize:         resb                                RECT_size
+
+      section .text
+
+      _main:
+
+; stdcall
+; LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+      wndproc:
+      ; prologue
+        push  ebp
+        mov   ebp, esp
+        push  ebx
+        push  ecx
+        push  edx
+        mov   ebx, [ebp+12]         ; msg
+                                    ; handle messages
+        cmp   ebx, WM_PAINT
+        jz    .wm_paint
+        cmp   ebx, WM_CLOSE
+        jz    .wm_close
+        cmp   ebx, WM_DESTROY
+        jz    .wm_destroy
+        cmp   ebx, WM_GETMINMAXINFO
+        jz    .wm_getminmaxinfo
+        jmp   .default
+      .wm_paint:
+        push  str_WM_PAINT
+        call  wndproc_println
+        ; prep
+        call  backbuffer_resize
+        call  backbuffer_draw
+        ; beginpaint
+        sub   esp, PAINTSTRUCT_size
+        mov   edx, esp
+        push  edx
+        push  [WindowHandle]
+        call  _BeginPaint@8
+        cmp   eax, 0
+        jnz   .wm_paint_beginpaint_ok
+        push  str_BeginPaint
+        call  show_error_and_exit
+        ; (re)draw
+      .wm_paint_beginpaint_ok:
+        push  eax                   ; DC from BeginPaint
+        call  backbuffer_render
+        ; endpaint
+        push  edx
+        push  [WindowHandle]
+        call  _EndPaint@8
+        add   esp, PAINTSTRUCT_size
+        jmp   .return_handled
+      .wm_close:
+        push  str_WM_CLOSE
+        call  wndproc_println
+        mov   [AppRunning], 0
+        jmp   .return_handled
+      .wm_destroy:
+        push  str_WM_DESTROY
+        call  wndproc_println
+        mov   [AppRunning], 0
+        jmp   .return_handled
+      .wm_getminmaxinfo:
+        push  str_WM_GETMINMAXINFO
+        call  wndproc_println
+        mov   ecx, [ebp+20]         ; *MINMAXINFO
+        add   [ecx+MINMAXINFO.ptMinTrackSize+POINT.x], 16
+        add   [ecx+MINMAXINFO.ptMinTrackSize+POINT.y], 16
+        jmp   .return_handled
+      .default:
+        push  [ebp+20]
+        push  [ebp+16]
+        push  [ebp+12]
+        push  [ebp+8]
+        call  _DefWindowProcA@16
+        jmp   .return               ; eax should hold return value here
+                                    ; epilogue
+      .return_handled:
+        mov   eax, 0
+      .return:
+        pop   edx
+        pop   ecx
+        pop   ebx
+        pop   ebp
+        ret   16
+
+; reverse_string.asm
+; ----------------
+    section .data
+
+    section .data
+      string                              db "NewBoston"
+      stringLen                           equ ($-string)
+
+      section .text
+      global main
+      main:
+        mov   rbp, rsp              ; for correct debugging
+        mov   eax, string           ; Address of the first element
+        lea   ebx, [string+stringLen-1] ; Address of the last element
+        mov   ecx, stringLen/2      ; condition for our loop
+      reverse:
+        movzx rdi, byte [eax]       ; now contain "N" char
+        movzx rsi, byte [ebx]       ; now contain "n" char
+        mov   [eax], sil
+        mov   [ebx], dil
+        inc   eax
+        dec   ebx
+        dec   ecx
+        cmp   ecx, 0
+        jne   reverse
+
+; x86-experiments -> 005 -> vbuf_text.s
+; ----------------
+    section .data
+
+    %ifndef _VBUF_TEXT_S_
+    %define _VBUF_TEXT_S_
+
+    %include "vbuf.s"
+
+      struc                               ScreenFont
+      .GlyphW                             resb 1
+      endstruc
+
+      struc                               ScreenGlyphAdvance
+      ; lower bytes not used, so you can AND against whole structure
+      VB_SGA_RESET_X                      equ 0x00010000
+
+      .X                                  resb 1                        ; al
+      endstruc
+
+    section .data
+
+      GlyphsTitle                         incbin "ftitle.bin"
+
+    FontTitle:
+      istruc                              ScreenFont
+      at                                  ScreenFont.GlyphW, db 7
+      iend
+
+      vbuftest_strtitle                   db "Test Title String!", 0x0A, 0xB0, "...with a newline~~~", 0xDF, 0x0A, "shorty L3", 0
+
+      section .text
+
+; stdcall
+; fn vbuf_measure_text(str: [*:0]const u8, font: *ScreenFont) ScreenSize
+      vbuf_measure_text:
+        push  ebp
+        mov   ebp, esp
+        push  ebx
+        push  ecx
+        push  edx
+        push  edi
+        sub   esp, 8
+        ; draw text
+        mov   ecx, [ebp+12]         ; font
+        mov   [esp], dword 0
+        mov   [esp+4], dword 0
+        mov   eax, [ebp+8]          ; str
+        lea   ebx, [esp+0]
+        lea   edx, [esp+2]
+      .oloop:
+        push  eax
+        mov   al, byte [eax]
+        cmp   al, 0
+        je    .oloop_end
+        and   eax, 0xFF
+        push  VB_CHR_NODRAW         ; flags
+        push  ecx                   ; font
+        push  eax                   ; char
+        push  [ebx]                 ; x and y -- equivalent to:  push word [edx], push word [ebx]
+        push  0                     ; color
+        call  vbuf_draw_char
+        ; handle advance conditions
+        push  edx
+        push  ebx
+        push  0                     ; 0xXXXXYYYY (should be fine since it matches fn sig)
+        call  vbuf_parse_advance
+        ; update ScreenSize
+        mov   di, word [edx]
+        cmp   di, word [ebx+4+ScreenSize.H]
+        jle   .max_h_ok
+        mov   word [ebx+4+ScreenSize.H], di
+      .max_h_ok:
+        mov   di, word [ebx]        ; w second, so it's still in di after last iteration
+        cmp   di, word [ebx+4+ScreenSize.W]
+        jle   .max_w_ok
+        mov   word [ebx+4+ScreenSize.W], di
+      .max_w_ok:
+      ; prep next iteration
+        pop   eax
+        inc   eax
+        jmp   .oloop
+      .oloop_end:
+        pop   eax
+        ; finalize ScreenSize
+        xor   edx, edx
+        cmp   di, 0                 ; if last row actually drew a character, add glyph h to max size
+        jle   .final_y_ok
+        mov   dl, byte [ecx+ScreenFont.GlyphH]
+        add   word [ebx+4+ScreenSize.H], dx
+        jmp   .final_x              ; if we had to do this, we already know the output w is > 0
+      .final_y_ok:
+        cmp   word [ebx+4+ScreenSize.W], 0
+        jle   .final_x_ok
+      .final_x:
+        mov   di, word [ebx+4+ScreenSize.W]
+        mov   dl, byte [ecx+ScreenFont.AdvanceX]
+        sub   di, dx
+        mov   dl, byte [ecx+ScreenFont.GlyphW]
+        add   di, dx
+        mov   word [ebx+4+ScreenSize.W], di
+      .final_x_ok:
+        mov   eax, [ebx+4]          ; eax <- ScreenSize
+                                    ; epilogue
+        add   esp, 8
+        pop   edi
+        pop   edx
+        pop   ecx
+        pop   ebx
+        pop   ebp
+        ret   8
+
+      %endif
+
+; x86-experiments -> 005 -> win32.s
+; ----------------
+    section .data
+
+    %ifndef _WIN32_S_
+    %define _WIN32_S_
+
+; FUNCTIONS
+
+    extern _GetModuleHandleA@4                                          ; kernel32.lib
+
+    extern _MessageBoxA@16                                              ; user32.lib
+    extern _CreateWindowExA@48                                          ; user32.lib
+
+    extern _CreateCompatibleDC@4                                        ; gdi32.lib
+    extern _DeleteDC@4                                                  ; gdi32.lib
+    extern _GetObject@12                                                ; gdi32.lib
+
+    extern _HidP_GetCaps@8                                              ; hidparse.lib
+    extern _HidP_GetValueCaps@16                                        ; hidparse.lib
+    extern _HidP_GetButtonCaps@16                                       ; hidparse.lib
+    extern _HidP_GetUsages@32                                           ; hidparse.lib
+
+; STRUCTURES
+
+      struc                               RAWINPUT
+      .header                             resb RAWINPUTHEADER_size
+      .data.mouse                         resd 0                        ; RAWMOUSE   
+      .data.keyboard                      resd 0                        ; RAWKEYBOARD
+      .data.hid                           resd 0                        ; RAWHID     
+      .data                               resb RAWMOUSE_size            ; union
+      endstruc
+
+; CONSTANTS
+
+    section .data
+
+; error codes
+      ERROR_ACCESS_DENIED                 equ 0x00000005
+      ; misc
+      NULL                                equ 0
+      STD_OUTPUT_HANDLE                   equ - 11
+      IDI_APPLICATION                     equ 0x7F00
+      COLOR_WINDOWFRAME                   equ 6
+      LR_DEFAULTSIZE                      equ 0x00000040
+      ; window image resources
+      IMAGE_BITMAP                        equ 0                         ; C:\Program Files (x86)\Windows Kits\10\Include\<ver>\um\winuser.h
+      IMAGE_ICON                          equ 1
+      ; gdi
+      DIB_RGB_COLORS                      equ 0
+      ROP_SRCCOPY                         equ 0x00CC0020                ; just SRCCOPY in wingdi.h
+      GDI_ERROR                           equ 0xFFFFFFFF
+      ; formatmessage
+      FORMAT_MESSAGE_ALLOCATE_BUFFER      equ 0x00000100
+      ; hid (human interface device)
+      HID_USAGE_PAGE_GENERIC              equ 0x0001
+      HID_USAGE_GENERIC_MULTI_AXIS_CONTROLLER equ 0x0008
+      ; rid (raw input device)
+      RID_INPUT                           equ 0x10000003
+
+      str_RegisterClassExA                db "RegisterClassExA", 0
+
+      str_WM_EXITSIZEMOVE                 db "WM_EXITSIZEMOVE", 0
+
+    %endif

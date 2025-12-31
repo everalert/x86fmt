@@ -267,10 +267,14 @@ test "Format" {
     //  - test/fmt.base.s
     //  - test/fmt.default.s
     //  - test/fmt.all.s
+    //----
     // TODO: auto-completing scopes at end of line when scope ender not present
+    //--
     //  "unclosed string  ->  "unclosed string"
     //  (unclosed paren   ->  (unclosed paren)
+    //----
     // TODO: complex nested alignment
+    //--
     //    \\section .data
     //    \\	FontTitle:
     //    \\	istruc ScreenFont
@@ -280,11 +284,50 @@ test "Format" {
     //    \\		at ScreenFont.AdvanceY,		db 16
     //    \\		at ScreenFont.pGlyphs,		dd GlyphsTitle
     //    \\	iend
+    //----
     // TODO: non-scoped math statements without separating spaces ?? the examples
     //  below would need 'equ' to be recognised by lexer as self-contained
+    //--
     //    ATTACH_PARENT_PROCESS           equ -1
     //    ATTACH_PARENT_PROCESS_ADDR      equ $-ATTACH_PARENT_PROCESS
-    //
+    //----
+    // TODO: `%%success` should be indented here (currently lines up with `%macro`)
+    //--
+    //%macro WriteConsole 2
+    //    jmp                             %%success
+    //    ShowErrorMessage                str_err_write_console
+    //    %%success:
+    //%endmacro
+    //----
+    // TODO: comment should be indented here (currently in line with `section`)
+    //--
+    //section .data
+    //    ; win32 constants
+    //    NULL                            equ 0
+    //----
+    // TODO: ?? `HINSTANCE:` here currently lines up with `section` and `resd 1`
+    //  becomes separated, not sure if should just force ppl to not use colon
+    //  (no difference in nasm) or actually make it render nicely like below
+    //--
+    //section .bss
+    //    HINSTANCE:                      resd 1
+    //----
+    // TODO: second comment currently lines up with first comment here, should
+    //  line up with `cmp` (probably with some kind of "list comment" identifier)
+    //--
+    //    mov     ebx, [ebp+12]               ; msg
+    //    ; handle messages
+    //    cmp     ebx, WM_PAINT
+    //----
+    // TODO: fix: line start comment (post-blank alignment) unaffected by section
+    //  indentation settings; should use the indentation as a default, unless
+    //  aligning with following line as planned
+    // TODO: fix: section directive affected by its own section indentation; should
+    //  align to 0 as the section directive itself is "sectionless"
+    //--
+    //(prev section indent: 2)
+    //; some dummy data for 'other' section context
+    //        section .definitely_not_a_normal_section ('other' indent: 8)
     const dummy32 = "Lorem ipsum dolor sit amet, cons";
     const dummy1 = "a";
     const test_cases = [_]FormatTestCase{
