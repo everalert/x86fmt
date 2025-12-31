@@ -17,8 +17,9 @@ pub fn main() !void {
 
     const stdi = std.io.getStdIn();
     const stdo = std.io.getStdOut();
+    const stde = std.io.getStdErr();
 
-    return App.Main(alloc, &args, stdi, stdo);
+    return App.Main(alloc, &args, stdi, stdo, stde);
 }
 
 test {

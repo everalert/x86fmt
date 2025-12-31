@@ -67,6 +67,7 @@ pub fn Formatter(
         pub fn Format(
             reader: anytype,
             writer: anytype,
+            err_writer: anytype,
             settings: Settings,
         ) !void {
             var line_tok = std.ArrayListUnmanaged(Token).initBuffer(&TokBufLine);
@@ -79,6 +80,7 @@ pub fn Formatter(
             line_ctx.Section = .None;
             Line.CtxUpdateColumns(&line_ctx, &settings);
 
+            // TODO: line counter for output lines, use with WriteErrorMessage
             var line_ctx_prev = line_ctx;
             var blank_lines: usize = 0;
             var line_i: usize = 0;
@@ -91,12 +93,14 @@ pub fn Formatter(
                     line_lex.clearRetainingCapacity();
                 }
 
+                // TODO: dump file verbatim and post message to err_writer instead?
                 if (line_i == 0 and std.mem.startsWith(u8, line_s, &ByteOrderMark))
                     return error.SourceContainsBOM;
 
                 if (!std.unicode.utf8ValidateSlice(line_s)) {
                     _ = out_w.write(line_s) catch break;
                     _ = out_w.write("\n") catch break;
+                    WriteErrorMessage(err_writer, line_i, "Line Error", "InvalidUtf8") catch break;
                     continue;
                 }
 
@@ -158,13 +162,15 @@ pub fn Formatter(
                     continue;
                 }
 
-                Token.TokenizeUnicode(&line_tok, body, BUF_SIZE_TOK) catch {
+                Token.TokenizeUnicode(&line_tok, body, BUF_SIZE_TOK) catch |err| {
+                    WriteErrorMessage(err_writer, line_i, "Token Error", @errorName(err)) catch break;
                     _ = out_w.write(line_s) catch break;
                     _ = out_w.write("\n") catch break;
                     continue;
                 };
 
-                Lexeme.ParseTokens(&line_lex, line_tok.items) catch {
+                Lexeme.ParseTokens(&line_lex, line_tok.items) catch |err| {
+                    WriteErrorMessage(err_writer, line_i, "Lexeme Error", @errorName(err)) catch break;
                     _ = out_w.write(line_s) catch break;
                     _ = out_w.write("\n") catch break;
                     continue;
@@ -248,6 +254,11 @@ pub fn Formatter(
                 try Lexeme.BufAppendSlice(writer, lex[1..], &fmtgen_i, .{}, BUF_SIZE_TOK);
             }
         }
+
+        /// @line   zero-indexed line number
+        fn WriteErrorMessage(writer: anytype, line: usize, label: []const u8, error_message: []const u8) !void {
+            try writer.print("L{d:0>4}: {s} ({s})\n", .{ line + 1, label, error_message });
+        }
     };
 }
 
@@ -258,7 +269,11 @@ pub fn Formatter(
 // TODO: probably migrate most of this to individual line component tests in
 //  future, although some are more generic (e.g. BOM test); also real end-to-end
 //  test should pull in source files at comptime?
+// TODO: stderr tests (either here or in app main, probably here tho)
 test "Format" {
+    std.testing.log_level = .debug;
+    const stde_w = std.io.null_writer;
+
     const BUF_SIZE_LINE_IO = 4096; // NOTE: meant to be 4095; std bug in Reader.readUntilDelimiterOrEof
     const BUF_SIZE_LINE_TOK = 1024;
     const BUF_SIZE_LINE_LEX = 512;
@@ -628,7 +643,6 @@ test "Format" {
         },
     };
 
-    std.testing.log_level = .debug;
     for (test_cases, 0..) |t, i| {
         errdefer std.debug.print("FAILED {d:0>2}\n\n", .{i});
 
@@ -636,7 +650,7 @@ test "Format" {
         var output = std.ArrayList(u8).init(std.testing.allocator);
         defer output.deinit();
 
-        const result = fmt.Format(input.reader(), output.writer(), .{});
+        const result = fmt.Format(input.reader(), output.writer(), stde_w, .{});
 
         if (t.err) |e| {
             try std.testing.expectError(e, result);

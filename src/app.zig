@@ -12,12 +12,11 @@ const BUF_SIZE_LINE_TOK = 1024;
 const BUF_SIZE_LINE_LEX = 512;
 const BUF_SIZE_TOK = 256;
 
-// TODO: stderr
 /// @args   *ArgIterator or *ArgIteratorGeneral from std.process
 ///         assumes argument containing executable name is already skipped
 /// @stdi   stdin File
 /// @stdo   stdout File
-pub fn Main(alloc: Allocator, args: anytype, stdi: File, stdo: File) !void {
+pub fn Main(alloc: Allocator, args: anytype, stdi: File, stdo: File, stde: File) !void {
     var settings = AppSettings.ParseCLI(alloc, args) catch return;
     defer settings.Deinit(alloc);
 
@@ -48,8 +47,13 @@ pub fn Main(alloc: Allocator, args: anytype, stdi: File, stdo: File) !void {
         var bw = std.io.bufferedWriter(fo.writer());
         defer bw.flush() catch {};
 
+        var bew = std.io.bufferedWriter(stde.writer());
+        defer bew.flush() catch {};
+
         const fmt = Formatter(BUF_SIZE_LINE_IO, BUF_SIZE_LINE_TOK, BUF_SIZE_LINE_LEX, BUF_SIZE_TOK);
-        fmt.Format(br.reader(), bw.writer(), settings.Format) catch {};
+        fmt.Format(br.reader(), bw.writer(), bew.writer(), settings.Format) catch |err| {
+            try stde.writer().print("Formatting Error ({s})", .{@errorName(err)});
+        };
     }
 
     if (settings.bIOFileSame)
@@ -60,8 +64,10 @@ pub fn Main(alloc: Allocator, args: anytype, stdi: File, stdo: File) !void {
 
 // TODO: assign temp dir and alloc filenames within each loop?
 // TODO: test tty, somehow
+// TODO: stderr tests
 test "App Main" {
     std.testing.log_level = .debug;
+    const error_file = "stderr_dump.txt";
 
     const TestCase = struct {
         const TestCaseIO = enum { file, console };
@@ -225,6 +231,7 @@ test "App Main" {
     inline for (test_cases, 0..) |t, i| {
         errdefer std.debug.print("FAILED {d:0>2} :: {s}\n\n", .{ i, t.cmd });
         defer _ = loop_arena.reset(.retain_capacity);
+        defer tmpdir.dir.deleteFile(error_file) catch {};
         defer tmpdir.dir.deleteFile(input_file) catch {};
         defer tmpdir.dir.deleteFile(output_file_buf) catch {};
         defer tmpdir.dir.deleteFile(output_file_disk) catch {};
@@ -252,9 +259,12 @@ test "App Main" {
             };
             defer if (t.out == .console) output.close();
 
+            const stde = try tmpdir.dir.createFile(error_file, .{});
+            defer stde.close();
+
             var args = try std.process.ArgIteratorGeneral(.{}).init(loop_arena_alloc, t.cmd);
 
-            try Main(loop_arena_alloc, &args, input, output);
+            try Main(loop_arena_alloc, &args, input, output, stde);
         }
 
         const output_buf = blk: {
