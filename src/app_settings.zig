@@ -18,7 +18,7 @@ const eql = std.mem.eql;
 
 const StageTwoCheck = @import("utl_cli.zig").StageTwoCheck;
 const EnumCheckOnce = @import("utl_cli.zig").EnumCheckOnce;
-const BoolCheckOnce = @import("utl_cli.zig").BoolCheckOnce;
+const BoolCheck = @import("utl_cli.zig").BoolCheck;
 const RawCheck = @import("utl_cli.zig").RawCheck;
 
 const FormatSettings = @import("fmt.zig").Settings;
@@ -95,7 +95,7 @@ pub const HelpText = HelpTextHeader ++
 pub const IOKind = enum { Console, File };
 
 // TODO: ?? RepeatedOption, if going to always show error message on malformed cli
-pub const Error = error{InvalidTwoPartArgument};
+pub const Error = error{ MissingArgumentValue, UnknownFlag };
 
 Format: FormatSettings,
 IKind: IOKind,
@@ -176,25 +176,23 @@ pub fn ParseCLI(alloc: Allocator, args: anytype) !AppSettings {
     var b_show_help = false;
     var b_io_file_same = false;
     var fmt = FormatSettings{};
+    errdefer alloc.free(i_file);
+    errdefer alloc.free(o_file);
 
     var waiters = std.mem.zeroes(Waiters);
 
     //_ = args.next(); // executable location in argv[0] should be skipped before running this
     while (args.next()) |arg| {
-        // FIXME: bug here where if you pass -fo twice, the second '-fo' ends up
-        //  being the input to the input file option. ideally need some construct
-        //  that does the two-stage option in a unified way and just skips if the
-        //  option is already set
         const fo = EnumCheckOnce(arg, &.{"-fo"}, IOKind, .File, &o_kind);
         if (StageTwoCheck(alloc, arg, fo, []const u8, &o_file, &.{}, &waiters.fo))
             continue;
         if (EnumCheckOnce(arg, &.{"-co"}, IOKind, .Console, &o_kind))
             continue;
 
-        if (BoolCheckOnce(arg, &.{ "-tty", "--allow-tty" }, &b_allow_tty))
+        if (BoolCheck(arg, &.{ "-tty", "--allow-tty" }, &b_allow_tty))
             continue;
 
-        if (BoolCheckOnce(arg, &.{ "-h", "--help" }, &b_show_help))
+        if (BoolCheck(arg, &.{ "-h", "--help" }, &b_show_help))
             break;
 
         const ts = RawCheck(arg, &.{ "-ts", "--tab-size" });
@@ -234,12 +232,15 @@ pub fn ParseCLI(alloc: Allocator, args: anytype) !AppSettings {
         if (StageTwoCheck(alloc, arg, sio, usize, &fmt.SecIndentOther, def_fmt.SecIndentOther, &waiters.sio))
             continue;
 
+        if (arg[0] == '-')
+            return Error.UnknownFlag;
+
         if (i_kind != null) break;
         i_kind = .File;
         i_file = try alloc.dupe(u8, arg);
     }
 
-    if (waiters.AnyWaiting()) return Error.InvalidTwoPartArgument;
+    if (waiters.AnyWaiting()) return Error.MissingArgumentValue;
 
     if (i_kind == null) i_kind = .Console;
     if (o_kind == null) o_kind = i_kind;
@@ -276,9 +277,16 @@ test "App Settings" {
         err: ?Error = null,
     };
 
+    // TODO: handle case where i/o type is double-specified, but the type is not
+    //  the same, like below
+    //      "-co -fo filename"  <- specifying file output when console out already set
+    // TODO: ?? double-specifying input/output files specifically should return
+    //  error instead of ignore? as a way of communicating correct usage to user
+    // TODO: ?? maybe don't return an error in cases like below (double-specified
+    //  two-part args when second left hanging), as the value is actually set prior
+    //      "-ts 99 -ts" -> Error.MissingArgumentValue
     // TODO: ?? tests for option order (free-ness); not decided on the degree to
     //  which the order is "free", esp. wrt in-out opts
-    // TODO: ?? tests for not being able to set options twice, with error return
     const test_cases = [_]AppSettingsTestCase{
         .{
             // default settings (stdin -> stdout)
@@ -452,32 +460,86 @@ test "App Settings" {
                 break :blk ex;
             },
         },
+        .{
+            // file output apply once
+            .in = "-fo filename1 -fo filename2",
+            .ex = blk: {
+                var ex = def_settings;
+                ex.OFile = "filename1";
+                ex.OKind = .File;
+                break :blk ex;
+            },
+        },
+        .{
+            // TODO: maybe this case should simply ignore the missing value since
+            //  the value is already set?
+            .in = "filename1 filename2",
+            .ex = blk: {
+                var ex = def_settings;
+                ex.IFile = "filename1";
+                ex.IKind = .File;
+                ex.OFile = "filename1.tmp";
+                ex.OKind = .File;
+                ex.bIOFileSame = true;
+                break :blk ex;
+            },
+        },
         // error: two-part options left hanging
-        .{ .in = "-fo", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "-ts", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "-mbl", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "-tcc", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "-tia", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "-toa", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "-dcc", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "-dia", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "-doa", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "-sin", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "-sid", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "-sit", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "-sio", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "--tab-size", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "--max-blank-lines", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "--text-comment-column", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "--text-instruction-advance", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "--text-operands-advance", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "--data-comment-column", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "--data-instruction-advance", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "--data-operands-advance", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "--section-indent-none", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "--section-indent-data", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "--section-indent-text", .err = Error.InvalidTwoPartArgument },
-        .{ .in = "--section-indent-other", .err = Error.InvalidTwoPartArgument },
+        .{ .in = "-fo", .err = Error.MissingArgumentValue },
+        .{ .in = "-ts", .err = Error.MissingArgumentValue },
+        .{ .in = "-mbl", .err = Error.MissingArgumentValue },
+        .{ .in = "-tcc", .err = Error.MissingArgumentValue },
+        .{ .in = "-tia", .err = Error.MissingArgumentValue },
+        .{ .in = "-toa", .err = Error.MissingArgumentValue },
+        .{ .in = "-dcc", .err = Error.MissingArgumentValue },
+        .{ .in = "-dia", .err = Error.MissingArgumentValue },
+        .{ .in = "-doa", .err = Error.MissingArgumentValue },
+        .{ .in = "-sin", .err = Error.MissingArgumentValue },
+        .{ .in = "-sid", .err = Error.MissingArgumentValue },
+        .{ .in = "-sit", .err = Error.MissingArgumentValue },
+        .{ .in = "-sio", .err = Error.MissingArgumentValue },
+        .{ .in = "--tab-size", .err = Error.MissingArgumentValue },
+        .{ .in = "--max-blank-lines", .err = Error.MissingArgumentValue },
+        .{ .in = "--text-comment-column", .err = Error.MissingArgumentValue },
+        .{ .in = "--text-instruction-advance", .err = Error.MissingArgumentValue },
+        .{ .in = "--text-operands-advance", .err = Error.MissingArgumentValue },
+        .{ .in = "--data-comment-column", .err = Error.MissingArgumentValue },
+        .{ .in = "--data-instruction-advance", .err = Error.MissingArgumentValue },
+        .{ .in = "--data-operands-advance", .err = Error.MissingArgumentValue },
+        .{ .in = "--section-indent-none", .err = Error.MissingArgumentValue },
+        .{ .in = "--section-indent-data", .err = Error.MissingArgumentValue },
+        .{ .in = "--section-indent-text", .err = Error.MissingArgumentValue },
+        .{ .in = "--section-indent-other", .err = Error.MissingArgumentValue },
+        // TODO: maybe these cases should simply ignore the missing value since
+        //  the value is already set?
+        // error: double-specified two-part option left hanging on second spec
+        .{ .in = "-fo filename1 -fo", .err = Error.MissingArgumentValue },
+        .{ .in = "-ts 9999 -ts", .err = Error.MissingArgumentValue },
+        .{ .in = "-mbl 9999 -mbl", .err = Error.MissingArgumentValue },
+        .{ .in = "-tcc 9999 -tcc", .err = Error.MissingArgumentValue },
+        .{ .in = "-tia 9999 -tia", .err = Error.MissingArgumentValue },
+        .{ .in = "-toa 9999 -toa", .err = Error.MissingArgumentValue },
+        .{ .in = "-dcc 9999 -dcc", .err = Error.MissingArgumentValue },
+        .{ .in = "-dia 9999 -dia", .err = Error.MissingArgumentValue },
+        .{ .in = "-doa 9999 -doa", .err = Error.MissingArgumentValue },
+        .{ .in = "-sin 9999 -sin", .err = Error.MissingArgumentValue },
+        .{ .in = "-sid 9999 -sid", .err = Error.MissingArgumentValue },
+        .{ .in = "-sit 9999 -sit", .err = Error.MissingArgumentValue },
+        .{ .in = "-sio 9999 -sio", .err = Error.MissingArgumentValue },
+        .{ .in = "--tab-size 9999 --tab-size", .err = Error.MissingArgumentValue },
+        .{ .in = "--max-blank-lines 9999 --max-blank-lines", .err = Error.MissingArgumentValue },
+        .{ .in = "--text-comment-column 9999 --text-comment-column", .err = Error.MissingArgumentValue },
+        .{ .in = "--text-instruction-advance 9999 --text-instruction-advance", .err = Error.MissingArgumentValue },
+        .{ .in = "--text-operands-advance 9999 --text-operands-advance", .err = Error.MissingArgumentValue },
+        .{ .in = "--data-comment-column 9999 --data-comment-column", .err = Error.MissingArgumentValue },
+        .{ .in = "--data-instruction-advance 9999 --data-instruction-advance", .err = Error.MissingArgumentValue },
+        .{ .in = "--data-operands-advance 9999 --data-operands-advance", .err = Error.MissingArgumentValue },
+        .{ .in = "--section-indent-none 9999 --section-indent-none", .err = Error.MissingArgumentValue },
+        .{ .in = "--section-indent-data 9999 --section-indent-data", .err = Error.MissingArgumentValue },
+        .{ .in = "--section-indent-text 9999 --section-indent-text", .err = Error.MissingArgumentValue },
+        .{ .in = "--section-indent-other 9999 --section-indent-other", .err = Error.MissingArgumentValue },
+        // error: invalid/unknown flag
+        .{ .in = "--will-never-be-a-real-flag-surely", .err = Error.UnknownFlag },
     };
 
     std.testing.log_level = .debug;

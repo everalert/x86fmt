@@ -5,6 +5,10 @@ const eql = std.mem.eql;
 
 const BLAND = @import("utl_branchless.zig").BLAND;
 
+// TODO: ideally need some construct that does the two-stage option in a unified
+//  way and just skips if the option is already set, so that the user doesn't need
+//  to juggle multiple states separately to coordinate a two-stage setting
+
 // all helpers return whether they got a "hit" on a cli flag, indicating that the
 // parsing loop can short circuit
 
@@ -43,18 +47,18 @@ pub fn StageTwoCheck(
     return stage1_triggered;
 }
 
-/// sets a bool to true if argument matches any, skipping if the bool is already
-/// set true
-pub fn BoolCheckOnce(
+/// sets a bool to true if argument matches any
+pub fn BoolCheck(
     arg: []const u8,
     comptime flags: []const []const u8,
     out: *bool,
 ) bool {
-    if (out.*) return false;
-    inline for (flags) |flag| if (eql(u8, arg, flag)) {
-        out.* = true;
-        return true;
-    };
+    inline for (flags) |flag| {
+        if (eql(u8, arg, flag)) {
+            out.* = true;
+            return true;
+        }
+    }
     return false;
 }
 
@@ -67,18 +71,22 @@ pub fn EnumCheckOnce(
     val: T,
     out: *?T,
 ) bool {
-    if (out.* != null) return false;
-    inline for (flags) |flag| if (eql(u8, arg, flag)) {
-        out.* = val;
-        return true;
+    const matched: bool = match: {
+        inline for (flags) |flag|
+            if (eql(u8, arg, flag))
+                break :match true;
+        break :match false;
     };
-    return false;
+    if (BLAND(matched, out.* == null))
+        out.* = val;
+    return matched;
 }
 
 /// match an argument against a list of flags
 pub fn RawCheck(arg: []const u8, comptime flags: []const []const u8) bool {
     inline for (flags) |flag|
-        if (eql(u8, arg, flag)) return true;
+        if (eql(u8, arg, flag))
+            return true;
     return false;
 }
 

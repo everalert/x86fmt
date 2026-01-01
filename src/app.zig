@@ -17,7 +17,10 @@ const BUF_SIZE_TOK = 256;
 /// @stdi   stdin File
 /// @stdo   stdout File
 pub fn Main(alloc: Allocator, args: anytype, stdi: File, stdo: File, stde: File) !void {
-    var settings = AppSettings.ParseCLI(alloc, args) catch return;
+    var settings = AppSettings.ParseCLI(alloc, args) catch |err| {
+        try stde.writer().print("Settings Error ({s})", .{@errorName(err)});
+        return;
+    };
     defer settings.Deinit(alloc);
 
     if (settings.bShowHelp) {
