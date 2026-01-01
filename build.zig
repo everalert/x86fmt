@@ -1,17 +1,26 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-// TODO: export as module
+const manifest: struct {
+    const Dependency = struct { url: []const u8, hash: []const u8, lazy: bool = false };
+    name: enum { x86fmt },
+    version: []const u8,
+    fingerprint: u64,
+    required_zig_version: []const u8,
+    dependencies: struct { zbench: Dependency },
+    paths: []const []const u8,
+} = @import("build.zig.zon");
 
-// TODO: update to pull from build.zig.zon
 comptime {
-    const req_zig = std.SemanticVersion.parse("0.14.1") catch unreachable;
+    const req_zig = std.SemanticVersion.parse(manifest.required_zig_version) catch unreachable;
     const cur_zig = builtin.zig_version;
     if (cur_zig.order(req_zig) != .eq) {
         const error_message = "Invalid Zig version ({}). Please use {}.\n";
         @compileError(std.fmt.comptimePrint(error_message, .{ cur_zig, req_zig }));
     }
 }
+
+// TODO: export as module
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
