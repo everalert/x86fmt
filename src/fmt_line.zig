@@ -3,7 +3,7 @@ const Line = @This();
 const std = @import("std");
 const assert = std.debug.assert;
 
-const FormatSettings = @import("fmt.zig").Settings;
+const FormatSettings = @import("fmt_settings.zig");
 const Lexeme = @import("fmt_lexeme.zig");
 const Token = @import("fmt_token.zig");
 const BLOR = @import("utl_branchless.zig").BLOR;
@@ -25,6 +25,20 @@ pub const Context = struct {
     NewLineStr: []const u8,
     ActualColCom: usize, // the column that the comment actually ended up being written to
     ActualColFirst: usize, // the first non-whitespace column
+
+    pub const default: Context = .{
+        .Mode = .Blank,
+        .Section = .None,
+        .ColLab = 0,
+        .ColCom = 0,
+        .ColIns = 0,
+        .ColOps = 0,
+        .ColLabIns = 0,
+        .ColLabOps = 0,
+        .NewLineStr = &.{},
+        .ActualColCom = 0,
+        .ActualColFirst = 0,
+    };
 };
 
 // NOTE: assembler directives: 'primitive' directives enclosed in square brackets,
