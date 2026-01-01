@@ -1,15 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const manifest: struct {
-    const Dependency = struct { url: []const u8, hash: []const u8, lazy: bool = false };
-    name: enum { x86fmt },
-    version: []const u8,
-    fingerprint: u64,
-    required_zig_version: []const u8,
-    dependencies: struct { zbench: Dependency },
-    paths: []const []const u8,
-} = @import("build.zig.zon");
+const manifest: @import("src/app_manifest.zig") = @import("build.zig.zon");
 
 comptime {
     const req_zig = std.SemanticVersion.parse(manifest.required_zig_version) catch unreachable;
@@ -41,6 +33,7 @@ fn build_exe(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.buil
         .optimize = optimize,
     });
     exe.root_module.addImport("zbench", zbench_module);
+    exe.root_module.addAnonymousImport("build.zig.zon", .{ .root_source_file = b.path("build.zig.zon") });
     b.installArtifact(exe);
 }
 
@@ -48,6 +41,7 @@ fn build_step_tests(b: *std.Build, target: std.Build.ResolvedTarget, optimize: s
     const test_step = b.step("test", "Run unit tests");
 
     const testfiles = [_]struct { []const u8, std.Build.Module.CreateOptions }{
+        .{ "build.zig.zon", .{ .root_source_file = b.path("build.zig.zon") } },
         .{ "testfile_app_all", .{ .root_source_file = b.path("testing/app.all.asmtest") } },
         .{ "testfile_app_base", .{ .root_source_file = b.path("testing/app.base.asmtest") } },
         .{ "testfile_app_default", .{ .root_source_file = b.path("testing/app.default.asmtest") } },
