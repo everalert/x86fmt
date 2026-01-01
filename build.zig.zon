@@ -1,12 +1,13 @@
 .{
-    .name = "x86fmt",
-    .version = "0.0.0",
-    .minimum_zig_version = "0.13.0",
+    .name = .x86fmt,
+    .version = "0.1.1",
+    .required_zig_version = "0.14.1",
+    .fingerprint = 0xd9c36d68ebbd176f,
 
     .dependencies = .{
         .zbench = .{
-            .url = "https://github.com/hendriknielaender/zBench/archive/825b2267d4bff274cdcb515a8d87bfd7283be19e.tar.gz",
-            .hash = "1220776728be0ff572a3ff108ac334f373a8efd3ce252027adb967e6796f50d4a5e0",
+            .url = "git+https://github.com/hendriknielaender/zBench?ref=zig-0.14.0#7de11a92301fbc6232e6eba84734688b911b2ab4",
+            .hash = "zbench-0.9.2-YTdc79DoAADA2YNklaPqRzZxd3JwgRATsHi1cfqEOd_P",
         },
     },
 
@@ -14,7 +15,7 @@
         "build.zig",
         "build.zig.zon",
         "src",
-        "test",
+        "testing",
         "LICENSE",
         "README.md",
         "clean.bat",

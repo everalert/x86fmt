@@ -11,8 +11,10 @@ pub const Kind = enum(u8) { None, String, Comment, MathOp, Scope, Comma, Backsla
 
 pub const Error = error{ CapacityExceeded, TokenSizeExceeded };
 
-kind: Kind = .None,
-data: []const u8 = &.{},
+kind: Kind,
+data: []const u8,
+
+pub const default: Token = .{ .kind = .None, .data = &.{} };
 
 pub fn TokenizeUnicode(
     out: *std.ArrayListUnmanaged(Token),
@@ -26,7 +28,7 @@ pub fn TokenizeUnicode(
         const c = tokgen_it.nextCodepoint() orelse break;
         if (BLOR(c == ' ', c == '\t')) continue;
 
-        var token = std.mem.zeroes(Token);
+        var token: Token = .default;
         switch (c) {
             ',' => {
                 token.kind = .Comma;

@@ -1,16 +1,18 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-// TODO: export as module
+const manifest: @import("src/app_manifest.zig") = @import("build.zig.zon");
 
 comptime {
-    const req_zig = std.SemanticVersion.parse("0.13.0") catch unreachable;
+    const req_zig = std.SemanticVersion.parse(manifest.required_zig_version) catch unreachable;
     const cur_zig = builtin.zig_version;
     if (cur_zig.order(req_zig) != .eq) {
         const error_message = "Invalid Zig version ({}). Please use {}.\n";
         @compileError(std.fmt.comptimePrint(error_message, .{ cur_zig, req_zig }));
     }
 }
+
+// TODO: export as module
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -31,6 +33,7 @@ fn build_exe(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.buil
         .optimize = optimize,
     });
     exe.root_module.addImport("zbench", zbench_module);
+    exe.root_module.addAnonymousImport("build.zig.zon", .{ .root_source_file = b.path("build.zig.zon") });
     b.installArtifact(exe);
 }
 
@@ -38,6 +41,7 @@ fn build_step_tests(b: *std.Build, target: std.Build.ResolvedTarget, optimize: s
     const test_step = b.step("test", "Run unit tests");
 
     const testfiles = [_]struct { []const u8, std.Build.Module.CreateOptions }{
+        .{ "build.zig.zon", .{ .root_source_file = b.path("build.zig.zon") } },
         .{ "testfile_app_all", .{ .root_source_file = b.path("testing/app.all.asmtest") } },
         .{ "testfile_app_base", .{ .root_source_file = b.path("testing/app.base.asmtest") } },
         .{ "testfile_app_default", .{ .root_source_file = b.path("testing/app.default.asmtest") } },
@@ -61,16 +65,18 @@ fn build_step_tests(b: *std.Build, target: std.Build.ResolvedTarget, optimize: s
 }
 
 fn build_step_cleanup(b: *std.Build) void {
-    const clean_step = b.step("clean", "Clean up");
+    const clean_step = b.step("clean", "Remove build system artifacts");
 
-    clean_step.dependOn(&b.addRemoveDirTree(b.install_path).step);
-    if (@import("builtin").os.tag != .windows) {
-        clean_step.dependOn(&b.addRemoveDirTree(b.pathFromRoot(".zig-cache")).step);
+    clean_step.dependOn(&b.addRemoveDirTree(.{ .cwd_relative = b.install_path }).step);
+
+    if (builtin.os.tag != .windows) {
+        clean_step.dependOn(&b.addRemoveDirTree(.{ .cwd_relative = ".zig-cache" }).step);
     } else {
         clean_step.makeFn = CleanWindows;
     }
 }
 
-fn CleanWindows(_: *std.Build.Step, _: std.Progress.Node) anyerror!void {
-    std.log.err("Clean step not supported on Windows. Run `./clean.bat` instead.", .{});
+fn CleanWindows(_: *std.Build.Step, _: std.Build.Step.MakeOptions) anyerror!void {
+    // Windows locks `.zig-cache` during build, so we have to clean it outside the build system
+    std.log.err("Cannot remove `.zig-cache` during build process on Windows. Run `./clean.bat`", .{});
 }

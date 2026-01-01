@@ -6,6 +6,7 @@ const CLI = @import("utl_cli.zig");
 const Token = @import("fmt_token.zig");
 const Lexeme = @import("fmt_lexeme.zig");
 const Line = @import("fmt_line.zig");
+const Settings = @import("fmt_settings.zig");
 
 const BLAND = @import("utl_branchless.zig").BLAND;
 const IBLAND = @import("utl_branchless.zig").IBLAND;
@@ -14,37 +15,6 @@ const IBLXOR = @import("utl_branchless.zig").IBLXOR;
 const BLSEL = @import("utl_branchless.zig").BLSEL;
 const BLSELE = @import("utl_branchless.zig").BLSELE;
 const utf8LineMeasuringWriter = @import("utl_utf8_line_measuring_writer.zig").utf8LineMeasuringWriter;
-
-pub const Settings = struct {
-    TabSize: usize = 4,
-
-    /// Maximum number of consecutive blank lines; large gaps will be folded to
-    /// this number. Lines with comments do not count toward blanks.
-    MaxBlankLines: usize = 2,
-
-    /// Comment column, when line is not a standalone comment.
-    TextComCol: usize = 40,
-
-    /// Columns to advance from start of label to instruction. Lines without a
-    /// label will ignore this setting and inset the instruction by TabSize.
-    TextInsMinAdv: usize = 12,
-
-    /// Columns to advance from start of instruction to operands.
-    TextOpsMinAdv: usize = 8,
-
-    /// Alternate values for ComCol, InsMinGap and OpsMinGap, used only in the
-    /// data-type section context (e.g. ".data", ".bss", ".tls").
-    DataComCol: usize = 60,
-    DataInsMinAdv: usize = 16,
-    DataOpsMinAdv: usize = 32,
-
-    /// Base indentation for different section contexts (e.g. "section .data").
-    /// Other offsets are added to these depending on the section type.
-    SecIndentNone: usize = 0,
-    SecIndentData: usize = 0,
-    SecIndentText: usize = 0,
-    SecIndentOther: usize = 0,
-};
 
 pub fn Formatter(
     comptime BUF_SIZE_LINE_IO: usize,
@@ -75,9 +45,7 @@ pub fn Formatter(
             var out = utf8LineMeasuringWriter(writer);
             const out_w = out.writer();
 
-            var line_ctx = std.mem.zeroes(Line.Context);
-            line_ctx.Mode = .Blank;
-            line_ctx.Section = .None;
+            var line_ctx: Line.Context = .default;
             Line.CtxUpdateColumns(&line_ctx, &settings);
 
             // TODO: line counter for output lines, use with WriteErrorMessage
@@ -302,14 +270,14 @@ test "Format" {
     // TODO: complex nested alignment
     //--
     //    \\section .data
-    //    \\	FontTitle:
-    //    \\	istruc ScreenFont
-    //    \\		at ScreenFont.GlyphW,		db 7
-    //    \\		at ScreenFont.GlyphH,		db 12
-    //    \\		at ScreenFont.AdvanceX,		db 8
-    //    \\		at ScreenFont.AdvanceY,		db 16
-    //    \\		at ScreenFont.pGlyphs,		dd GlyphsTitle
-    //    \\	iend
+    //    \\    FontTitle:
+    //    \\    istruc ScreenFont
+    //    \\        at ScreenFont.GlyphW,       db 7
+    //    \\        at ScreenFont.GlyphH,       db 12
+    //    \\        at ScreenFont.AdvanceX,     db 8
+    //    \\        at ScreenFont.AdvanceY,     db 16
+    //    \\        at ScreenFont.pGlyphs,      dd GlyphsTitle
+    //    \\    iend
     //----
     // TODO: non-scoped math statements without separating spaces ?? the examples
     //  below would need 'equ' to be recognised by lexer as self-contained
@@ -650,7 +618,7 @@ test "Format" {
         var output = std.ArrayList(u8).init(std.testing.allocator);
         defer output.deinit();
 
-        const result = fmt.Format(input.reader(), output.writer(), stde_w, .{});
+        const result = fmt.Format(input.reader(), output.writer(), stde_w, .default);
 
         if (t.err) |e| {
             try std.testing.expectError(e, result);
