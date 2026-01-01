@@ -2,7 +2,7 @@
 
 x86fmt is an auto-formatter for NASM-style assembly.
 
-Requires Zig 0.13.0 to compile.
+Requires Zig 0.14.1 to compile.
 
 <!--
 ## Installation
