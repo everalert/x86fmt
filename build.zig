@@ -65,16 +65,18 @@ fn build_step_tests(b: *std.Build, target: std.Build.ResolvedTarget, optimize: s
 }
 
 fn build_step_cleanup(b: *std.Build) void {
-    const clean_step = b.step("clean", "Clean up");
+    const clean_step = b.step("clean", "Remove build system artifacts");
 
     clean_step.dependOn(&b.addRemoveDirTree(.{ .cwd_relative = b.install_path }).step);
-    if (@import("builtin").os.tag != .windows) {
-        clean_step.dependOn(&b.addRemoveDirTree(b.pathFromRoot(".zig-cache")).step);
+
+    if (builtin.os.tag != .windows) {
+        clean_step.dependOn(&b.addRemoveDirTree(.{ .cwd_relative = ".zig-cache" }).step);
     } else {
         clean_step.makeFn = CleanWindows;
     }
 }
 
 fn CleanWindows(_: *std.Build.Step, _: std.Build.Step.MakeOptions) anyerror!void {
-    std.log.err("Clean step not supported on Windows. Run `./clean.bat` instead.", .{});
+    // Windows locks `.zig-cache` during build, so we have to clean it outside the build system
+    std.log.err("Cannot remove `.zig-cache` during build process on Windows. Run `./clean.bat`", .{});
 }
