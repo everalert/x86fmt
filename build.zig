@@ -26,11 +26,15 @@ fn build_exe(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.buil
     const module_opts = .{ .target = target, .optimize = optimize };
     const zbench_module = b.dependency("zbench", module_opts).module("zbench");
 
+    const smaller_binary: bool = optimize == .ReleaseFast or optimize == .ReleaseSmall;
+
     const exe = b.addExecutable(.{
         .name = "x86fmt",
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .strip = smaller_binary,
+        .single_threaded = true,
     });
     exe.root_module.addImport("zbench", zbench_module);
     exe.root_module.addAnonymousImport("build.zig.zon", .{ .root_source_file = b.path("build.zig.zon") });
