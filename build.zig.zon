@@ -1,7 +1,8 @@
 .{
-    .name = "x86fmt",
-    .version = "0.0.0",
-    .minimum_zig_version = "0.13.0",
+    .name = .x86fmt,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.14.1",
+    .fingerprint = 0xd9c36d68ebbd176f,
 
     .dependencies = .{
         .zbench = .{

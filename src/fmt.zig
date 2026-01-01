@@ -302,14 +302,14 @@ test "Format" {
     // TODO: complex nested alignment
     //--
     //    \\section .data
-    //    \\	FontTitle:
-    //    \\	istruc ScreenFont
-    //    \\		at ScreenFont.GlyphW,		db 7
-    //    \\		at ScreenFont.GlyphH,		db 12
-    //    \\		at ScreenFont.AdvanceX,		db 8
-    //    \\		at ScreenFont.AdvanceY,		db 16
-    //    \\		at ScreenFont.pGlyphs,		dd GlyphsTitle
-    //    \\	iend
+    //    \\    FontTitle:
+    //    \\    istruc ScreenFont
+    //    \\        at ScreenFont.GlyphW,       db 7
+    //    \\        at ScreenFont.GlyphH,       db 12
+    //    \\        at ScreenFont.AdvanceX,     db 8
+    //    \\        at ScreenFont.AdvanceY,     db 16
+    //    \\        at ScreenFont.pGlyphs,      dd GlyphsTitle
+    //    \\    iend
     //----
     // TODO: non-scoped math statements without separating spaces ?? the examples
     //  below would need 'equ' to be recognised by lexer as self-contained

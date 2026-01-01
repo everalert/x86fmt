@@ -3,8 +3,9 @@ const builtin = @import("builtin");
 
 // TODO: export as module
 
+// TODO: update to pull from build.zig.zon
 comptime {
-    const req_zig = std.SemanticVersion.parse("0.13.0") catch unreachable;
+    const req_zig = std.SemanticVersion.parse("0.14.1") catch unreachable;
     const cur_zig = builtin.zig_version;
     if (cur_zig.order(req_zig) != .eq) {
         const error_message = "Invalid Zig version ({}). Please use {}.\n";
@@ -63,7 +64,7 @@ fn build_step_tests(b: *std.Build, target: std.Build.ResolvedTarget, optimize: s
 fn build_step_cleanup(b: *std.Build) void {
     const clean_step = b.step("clean", "Clean up");
 
-    clean_step.dependOn(&b.addRemoveDirTree(b.install_path).step);
+    clean_step.dependOn(&b.addRemoveDirTree(.{ .cwd_relative = b.install_path }).step);
     if (@import("builtin").os.tag != .windows) {
         clean_step.dependOn(&b.addRemoveDirTree(b.pathFromRoot(".zig-cache")).step);
     } else {
@@ -71,6 +72,6 @@ fn build_step_cleanup(b: *std.Build) void {
     }
 }
 
-fn CleanWindows(_: *std.Build.Step, _: std.Progress.Node) anyerror!void {
+fn CleanWindows(_: *std.Build.Step, _: std.Build.Step.MakeOptions) anyerror!void {
     std.log.err("Clean step not supported on Windows. Run `./clean.bat` instead.", .{});
 }
