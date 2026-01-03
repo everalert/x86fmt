@@ -11,7 +11,6 @@ const Settings = @import("fmt_settings.zig");
 const BLAND = @import("utl_branchless.zig").BLAND;
 const IBLAND = @import("utl_branchless.zig").IBLAND;
 const BLOR = @import("utl_branchless.zig").BLOR;
-const IBLXOR = @import("utl_branchless.zig").IBLXOR;
 const BLSEL = @import("utl_branchless.zig").BLSEL;
 const BLSELE = @import("utl_branchless.zig").BLSELE;
 const utf8LineMeasuringWriter = @import("utl_utf8_line_measuring_writer.zig").utf8LineMeasuringWriter;
@@ -31,6 +30,9 @@ pub fn Formatter(
         var TokBufLine = std.mem.zeroes([BUF_SIZE_LINE_TOK]Token);
         var LexBufLine = std.mem.zeroes([BUF_SIZE_LINE_LEX]Lexeme);
 
+        // TODO: make line ctx as input? that way, we could return an error and
+        //  the caller can decide if/how to print the error wrt line information,
+        //  rather than baking the error printing into this function
         /// Generic formatter for NASM-like assembly. Reader must contain valid
         /// UTF-8 without BOM; lines with invalid UTF-8 codepoints will be piped
         /// out unformatted, input with BOM will be rejected entirely.
@@ -40,6 +42,13 @@ pub fn Formatter(
             err_writer: anytype,
             settings: Settings,
         ) !void {
+            var line_s = reader.readUntilDelimiterOrEof(&RawBufLine, '\n') catch null orelse return;
+            var line_i: usize = 0;
+
+            // TODO: dump file verbatim and post message to err_writer instead?
+            if (std.mem.startsWith(u8, line_s, &ByteOrderMark))
+                return error.SourceContainsBOM;
+
             var line_tok = std.ArrayListUnmanaged(Token).initBuffer(&TokBufLine);
             var line_lex = std.ArrayListUnmanaged(Lexeme).initBuffer(&LexBufLine);
             var out = utf8LineMeasuringWriter(writer);
@@ -47,24 +56,20 @@ pub fn Formatter(
 
             var line_ctx: Line.Context = .default;
             Line.CtxUpdateColumns(&line_ctx, &settings);
+            line_ctx.NewLineStr = "\r\n"[@intFromBool(!std.mem.endsWith(u8, line_s, "\r"))..];
 
             // TODO: line counter for output lines, use with WriteErrorMessage
             var line_ctx_prev = line_ctx;
             var blank_lines: usize = 0;
-            var line_i: usize = 0;
-            while (reader.readUntilDelimiterOrEof(&RawBufLine, '\n') catch null) |line_s| : (line_i += 1) {
-                defer {
-                    line_ctx_prev = line_ctx;
-                    line_ctx.ActualColFirst = 0;
-                    line_ctx.ActualColCom = 0;
-                    line_tok.clearRetainingCapacity();
-                    line_lex.clearRetainingCapacity();
-                }
-
-                // TODO: dump file verbatim and post message to err_writer instead?
-                if (line_i == 0 and std.mem.startsWith(u8, line_s, &ByteOrderMark))
-                    return error.SourceContainsBOM;
-
+            while (true) : ({
+                line_s = reader.readUntilDelimiterOrEof(&RawBufLine, '\n') catch null orelse break;
+                line_i += 1;
+                line_ctx_prev = line_ctx;
+                line_ctx.ActualColFirst = 0;
+                line_ctx.ActualColCom = 0;
+                line_tok.clearRetainingCapacity();
+                line_lex.clearRetainingCapacity();
+            }) {
                 if (!std.unicode.utf8ValidateSlice(line_s)) {
                     _ = out_w.write(line_s) catch break;
                     _ = out_w.write("\n") catch break;
@@ -76,11 +81,8 @@ pub fn Formatter(
                     var body_s = line_s[0..];
                     var com_s = line_s[line_s.len..];
 
-                    const b_crlf = std.mem.endsWith(u8, body_s, "\r");
-                    if (b_crlf)
-                        body_s = body_s[0 .. body_s.len - 1];
-                    if (line_ctx.NewLineStr.len == 0)
-                        line_ctx.NewLineStr = "\r\n"[IBLXOR(true, b_crlf)..];
+                    const b_crlf = body_s.len > 0 and body_s[body_s.len - 1] == '\r';
+                    body_s = body_s[0 .. body_s.len - @intFromBool(b_crlf)];
 
                     var scope: ?u8 = null;
                     var escaped = false;
