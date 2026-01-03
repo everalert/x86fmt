@@ -547,7 +547,6 @@ test "Format" {
         },
         // pass through invalid utf-8 without formatting
         // https://stackoverflow.com/a/3886015
-        // FIXME: notify unformatted line via stderr
         .{
             .in = "section .text\n" ++
                 // invalid utf8 (codepoint malformed)
@@ -570,7 +569,6 @@ test "Format" {
                 "    mov     ebp, 16                     ; " ++ dummy32 ** 127 ++ dummy1 ** 17 ++ "\n",
         },
         // individual token size limits (256)
-        // FIXME: notify unformatted line via stderr
         .{
             .in = "section .text\n" ++
                 // long token
@@ -584,7 +582,6 @@ test "Format" {
         // line token buffer limits (1024)
         .{
             // line length token buffer overrun (line dumped verbatim)
-            // FIXME: notify unformatted line via stderr
             .in = "section .text\n" ++
                 "mov ebp, 16" ++ " [es:eax]" ** 256,
             .ex = "section .text\n" ++
@@ -599,7 +596,6 @@ test "Format" {
         // line lexeme buffer limits (512)
         .{
             // line length lexeme buffer overrun (line dumped verbatim)
-            // FIXME: notify unformatted line via stderr
             .in = "section .text\n" ++
                 "mov ebp, 16" ++ " a" ** 509,
             .ex = "section .text\n" ++

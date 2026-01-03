@@ -5,8 +5,6 @@ const App = @import("app.zig");
 
 var mem: [4096]u8 = undefined;
 
-// FIXME: add tests for app itself (via separate build step that runs the program
-//  with different intputs), testing different i/o configurations and cli opts
 pub fn main() !void {
     var fba = std.heap.FixedBufferAllocator.init(&mem);
     const alloc = fba.allocator();
