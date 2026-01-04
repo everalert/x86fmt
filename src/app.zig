@@ -73,13 +73,13 @@ test "App Main" {
     const error_file = "stderr_dump.txt";
 
     const TestCase = struct {
-        const TestCaseIO = enum { file, console };
+        const TestCaseIO = enum { File, Console };
 
         cmd: []const u8,
         in_data: []const u8,
         ex_data: []const u8,
-        in: TestCaseIO = .console,
-        out: TestCaseIO = .console,
+        in: TestCaseIO = .Console,
+        out: TestCaseIO = .Console,
         use_input_for_expected: bool = false,
         //tty: bool = false,
     };
@@ -115,14 +115,14 @@ test "App Main" {
             .cmd = try std.fmt.allocPrint(arena_alloc, "-fo {s}/{s}", .{ tmpdir_path, output_file_disk }),
             .in_data = testfile_app_base,
             .ex_data = testfile_app_default,
-            .out = .file,
+            .out = .File,
         },
         .{
             // file -> stdout
             .cmd = try std.fmt.allocPrint(arena_alloc, "{s}/{s} -co", .{ tmpdir_path, input_file }),
             .in_data = testfile_app_base,
             .ex_data = testfile_app_default,
-            .in = .file,
+            .in = .File,
         },
         .{
             // file1 -> file1
@@ -130,8 +130,8 @@ test "App Main" {
             .in_data = testfile_app_base,
             .ex_data = testfile_app_default,
             .use_input_for_expected = true,
-            .in = .file,
-            .out = .file,
+            .in = .File,
+            .out = .File,
         },
         .{
             // file1 -> file1 (explicit)
@@ -143,8 +143,8 @@ test "App Main" {
             .in_data = testfile_app_base,
             .ex_data = testfile_app_default,
             .use_input_for_expected = true,
-            .in = .file,
-            .out = .file,
+            .in = .File,
+            .out = .File,
         },
         .{
             // file1 -> file2
@@ -155,8 +155,8 @@ test "App Main" {
             ),
             .in_data = testfile_app_base,
             .ex_data = testfile_app_default,
-            .in = .file,
-            .out = .file,
+            .in = .File,
+            .out = .File,
         },
         // 'all' formatting
         .{
@@ -174,7 +174,7 @@ test "App Main" {
             ),
             .in_data = testfile_app_base,
             .ex_data = testfile_app_all,
-            .out = .file,
+            .out = .File,
         },
         .{
             // file -> stdout
@@ -185,7 +185,7 @@ test "App Main" {
             ),
             .in_data = testfile_app_base,
             .ex_data = testfile_app_all,
-            .in = .file,
+            .in = .File,
         },
         .{
             // file1 -> file1
@@ -197,8 +197,8 @@ test "App Main" {
             .in_data = testfile_app_base,
             .ex_data = testfile_app_all,
             .use_input_for_expected = true,
-            .in = .file,
-            .out = .file,
+            .in = .File,
+            .out = .File,
         },
         .{
             // file1 -> file1 (explicit)
@@ -210,8 +210,8 @@ test "App Main" {
             .in_data = testfile_app_base,
             .ex_data = testfile_app_all,
             .use_input_for_expected = true,
-            .in = .file,
-            .out = .file,
+            .in = .File,
+            .out = .File,
         },
         .{
             // file1 -> file2
@@ -222,8 +222,8 @@ test "App Main" {
             ),
             .in_data = testfile_app_base,
             .ex_data = testfile_app_all,
-            .in = .file,
-            .out = .file,
+            .in = .File,
+            .out = .File,
         },
     };
 
@@ -250,17 +250,17 @@ test "App Main" {
                 break :blk switch (t.in) {
                     // FIXME: thought you can do tty tests with `.allow_ctty = true`
                     //  here, but it seems not; need to figure out how
-                    .console => try tmpdir.dir.openFile(input_file, .{}),
-                    .file => std.io.getStdIn(), // dummy File
+                    .Console => try tmpdir.dir.openFile(input_file, .{}),
+                    .File => std.io.getStdIn(), // dummy File
                 };
             };
-            defer if (t.in == .console) input.close();
+            defer if (t.in == .Console) input.close();
 
             const output = switch (t.out) {
-                .console => try tmpdir.dir.createFile(output_file_buf, .{}),
-                .file => std.io.getStdOut(), // dummy File
+                .Console => try tmpdir.dir.createFile(output_file_buf, .{}),
+                .File => std.io.getStdOut(), // dummy File
             };
-            defer if (t.out == .console) output.close();
+            defer if (t.out == .Console) output.close();
 
             const stde = try tmpdir.dir.createFile(error_file, .{});
             defer stde.close();
@@ -272,8 +272,8 @@ test "App Main" {
 
         const output_buf = blk: {
             const ex_filename = if (t.use_input_for_expected) input_file else switch (t.out) {
-                .console => output_file_buf,
-                .file => output_file_disk,
+                .Console => output_file_buf,
+                .File => output_file_disk,
             };
             const f = try tmpdir.dir.openFile(ex_filename, .{});
             defer f.close();

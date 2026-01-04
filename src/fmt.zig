@@ -150,13 +150,16 @@ pub fn Formatter(
                 Line.CtxUpdateSection(&line_ctx, line_lex.items, &settings);
 
                 switch (line_ctx.Mode) {
+                    .Source,
+                    => FormatSourceLine(&out_w, line_lex.items, &line_ctx) catch break,
                     .AsmDirective,
                     .PreProcDirective,
                     .Macro,
                     => FormatGenericDirectiveLine(&out_w, line_lex.items, &line_ctx) catch break,
-                    .Source,
-                    => FormatSourceLine(&out_w, line_lex.items, &line_ctx) catch break,
-                    else => unreachable,
+                    .Blank,
+                    .Comment,
+                    .Unknown,
+                    => unreachable,
                 }
 
                 // NOTE: assumes the comment slice will contain the leading semicolon

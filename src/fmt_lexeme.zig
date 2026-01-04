@@ -67,7 +67,7 @@ pub fn ParseTokens(
                     .String, .MathOp => {
                         emit_lexeme = .Word;
                     },
-                    else => unreachable,
+                    .Comment, .None, .Scope => unreachable,
                 }
             },
         }
