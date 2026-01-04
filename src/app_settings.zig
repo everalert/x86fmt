@@ -21,7 +21,8 @@ const EnumCheckOnce = @import("utl_cli.zig").EnumCheckOnce;
 const BoolCheck = @import("utl_cli.zig").BoolCheck;
 const RawCheck = @import("utl_cli.zig").RawCheck;
 
-const FormatSettings = @import("fmt_settings.zig");
+// TODO: use exported module internally too (conflict with utl_branchless being shared)
+const FormatSettings = @import("root.zig").Settings;
 const VERSION_STRING = @import("app_version.zig").VERSION_STRING;
 
 // TODO: ?? accept input file without tag only if in first position, and require

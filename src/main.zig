@@ -1,3 +1,5 @@
+//! x86fmt executable
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
@@ -20,14 +22,7 @@ pub fn main() !void {
     return App.Main(alloc, &args, stdi, stdo, stde);
 }
 
-test {
+test "Application" {
     _ = @import("app.zig");
     _ = @import("app_settings.zig");
-    _ = @import("fmt.zig");
-    _ = @import("fmt_token.zig");
-    _ = @import("fmt_lexeme.zig");
-    _ = @import("fmt_line.zig");
-    _ = @import("utl_branchless.zig");
-    _ = @import("utl_cli.zig");
-    _ = @import("utl_utf8_line_measuring_writer.zig");
 }

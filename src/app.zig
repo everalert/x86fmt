@@ -4,7 +4,11 @@ const File = std.fs.File;
 const assert = std.debug.assert;
 
 const AppSettings = @import("app_settings.zig");
-const Formatter = @import("fmt.zig").Formatter;
+
+// TODO: use exported module internally too (conflict with utl_branchless being shared)
+const x86fmt = @import("root.zig");
+const Formatter = x86fmt.Fmt.Formatter;
+
 const BLAND = @import("utl_branchless.zig").BLAND;
 
 const BUF_SIZE_LINE_IO = 4096; // NOTE: meant to be 4095; std bug in Reader.readUntilDelimiterOrEof
@@ -16,6 +20,7 @@ const BUF_SIZE_TOK = 256;
 ///         assumes argument containing executable name is already skipped
 /// @stdi   stdin File
 /// @stdo   stdout File
+/// @stde   stderr File
 pub fn Main(alloc: Allocator, args: anytype, stdi: File, stdo: File, stde: File) !void {
     var settings = AppSettings.ParseCLI(alloc, args) catch |err| {
         try stde.writer().print("Settings Error ({s})", .{@errorName(err)});
