@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - ...
 -->
 
+## [Unreleased]
+
+### Nothing yet!
+
 
 ## [1.0.0] - 2026-01-05
 
@@ -31,4 +35,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 <!-- [unreleased]: https://github.com/everalert/x86fmt/compare/v1.0.0...HEAD -->
+[unreleased]: https://github.com/everalert/x86fmt/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/everalert/x86fmt/releases/tag/v1.0.0
