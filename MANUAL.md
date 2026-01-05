@@ -4,8 +4,8 @@
 work with NASM syntax.
 
 The primary intended use is in conjunction with editors such as `Neovim` in a 
-code action context, and it is therefore written for piped I/O as the base case.
-However, it is designed with I/O flexibility in mind. Users are able to freely 
+code action context, and it is therefore written for piped IO as the base case.
+However, it is designed with IO flexibility in mind. Users are able to freely 
 mix and match file and stdio modes for input and output.
 
 ## Contents
@@ -56,7 +56,7 @@ When no command line arguments are given,
 - output will be written to the stdout pipe, and
 - truncated help text will be shown if attempting to run it in a terminal emulator.
 
-The actual default I/O semantics are as follows:
+The actual default IO semantics are as follows:
 
 - Input mode = Console `<stdin>` (piped)
 - Output mode = match input setting
@@ -114,13 +114,13 @@ In your `build.zig`, add `x86fmt` as a dependency to your compile step. Here is
 a minimal example:
 
 ```zig
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
-    const bin = _; // setup `bin` using `b.addExecutable` or similar here
+const target = b.standardTargetOptions(.{});
+const optimize = b.standardOptimizeOption(.{});
+const bin = _; // setup `bin` using `b.addExecutable` or similar here
 
-    const x86fmt_dependency = b.dependency("x86fmt", .{ .target = target, .optimize = optimize });
-    const x86fmt_module = x86fmt_dependency.module("x86fmt");
-    bin.root_module.addImport("x86fmt", x86fmt_module);
+const x86fmt_dependency = b.dependency("x86fmt", .{ .target = target, .optimize = optimize });
+const x86fmt_module = x86fmt_dependency.module("x86fmt");
+bin.root_module.addImport("x86fmt", x86fmt_module);
 ```
 
 The module should now be importable as `x86fmt`.
