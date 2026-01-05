@@ -1,10 +1,19 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-// TODO: export as module
+const Build = std.Build;
+const ResolvedTarget = Build.ResolvedTarget;
+const OptimizeMode = std.builtin.OptimizeMode;
+const Step = Build.Step;
+const StepMakeOptions = Build.Step.MakeOptions;
+const Module = Build.Module;
+const ModuleCreateOptions = Build.Module.CreateOptions;
+const ModuleImport = Module.Import;
+
+const manifest: @import("src/app_manifest.zig") = @import("build.zig.zon");
 
 comptime {
-    const req_zig = std.SemanticVersion.parse("0.13.0") catch unreachable;
+    const req_zig = std.SemanticVersion.parse(manifest.required_zig_version) catch unreachable;
     const cur_zig = builtin.zig_version;
     if (cur_zig.order(req_zig) != .eq) {
         const error_message = "Invalid Zig version ({}). Please use {}.\n";
@@ -12,32 +21,91 @@ comptime {
     }
 }
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    build_exe(b, target, optimize);
-    build_step_tests(b, target, optimize);
-    build_step_cleanup(b);
+
+    // TODO: return module from this, and feed into build_binary and build_tests
+    build_module(b, "x86fmt", "src/root.zig");
+    build_binary(b, target, optimize, &.{});
+    build_clean(b);
+    build_tests(b, target, optimize);
 }
 
-fn build_exe(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {
-    const module_opts = .{ .target = target, .optimize = optimize };
-    const zbench_module = b.dependency("zbench", module_opts).module("zbench");
+// OUTPUT
 
-    const exe = b.addExecutable(.{
+fn build_module(b: *Build, name: []const u8, path: []const u8) void {
+    _ = b.addModule(name, .{ .root_source_file = b.path(path) });
+}
+
+fn build_binary(
+    b: *Build,
+    target: ResolvedTarget,
+    optimize: OptimizeMode,
+    imports: []const ModuleImport,
+) void {
+    const small_out: bool = optimize == .ReleaseFast or optimize == .ReleaseSmall;
+
+    const bin = b.addExecutable(.{
         .name = "x86fmt",
-        .root_source_file = b.path("src/main.zig"),
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main.zig"),
+            .imports = imports,
+            .target = target,
+            .optimize = optimize,
+            .strip = small_out,
+            .single_threaded = true,
+        }),
+    });
+
+    //const module_opts = .{
+    //    .target = target,
+    //    .optimize = optimize,
+    //    .strip = small_out,
+    //    .single_threaded = true,
+    //};
+    //const zbench_module = b.dependency("zbench", module_opts).module("zbench");
+    //exe.root_module.addImport("zbench", zbench_module);
+
+    bin.root_module.addAnonymousImport("build.zig.zon", .{ .root_source_file = b.path("build.zig.zon") });
+
+    b.installArtifact(bin);
+}
+
+// TESTS
+
+const TestEmbed = struct {
+    []const u8,
+    ModuleCreateOptions,
+};
+
+const TestDef = struct {
+    name: []const u8,
+    desc: []const u8,
+    entry: []const u8,
+    embeds: []const TestEmbed,
+};
+
+fn build_single_test(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, testdef: TestDef) void {
+    const step = b.step(testdef.name, testdef.desc);
+
+    const compile = b.addTest(.{
+        .root_source_file = b.path(testdef.entry),
         .target = target,
         .optimize = optimize,
     });
-    exe.root_module.addImport("zbench", zbench_module);
-    b.installArtifact(exe);
+
+    for (testdef.embeds) |embed|
+        compile.root_module.addAnonymousImport(embed[0], embed[1]);
+
+    const run = b.addRunArtifact(compile);
+
+    step.dependOn(&run.step);
 }
 
-fn build_step_tests(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode) void {
-    const test_step = b.step("test", "Run unit tests");
-
-    const testfiles = [_]struct { []const u8, std.Build.Module.CreateOptions }{
+fn build_tests(b: *Build, target: ResolvedTarget, optimize: OptimizeMode) void {
+    const embeds = &[_]TestEmbed{
+        .{ "build.zig.zon", .{ .root_source_file = b.path("build.zig.zon") } },
         .{ "testfile_app_all", .{ .root_source_file = b.path("testing/app.all.asmtest") } },
         .{ "testfile_app_base", .{ .root_source_file = b.path("testing/app.base.asmtest") } },
         .{ "testfile_app_default", .{ .root_source_file = b.path("testing/app.default.asmtest") } },
@@ -46,31 +114,43 @@ fn build_step_tests(b: *std.Build, target: std.Build.ResolvedTarget, optimize: s
         .{ "testfile_fmt_default", .{ .root_source_file = b.path("testing/fmt.default.asmtest") } },
     };
 
-    const tests_compile = b.addTest(.{
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
+    build_single_test(b, target, optimize, .{
+        .name = "test",
+        .desc = "Run all tests, including tests not covered by test-exe or test-module",
+        .entry = "src/test.zig",
+        .embeds = embeds,
     });
 
-    for (testfiles) |testfile|
-        tests_compile.root_module.addAnonymousImport(testfile[0], testfile[1]);
+    build_single_test(b, target, optimize, .{
+        .name = "test-exe",
+        .desc = "Run executable tests",
+        .entry = "src/main.zig",
+        .embeds = embeds,
+    });
 
-    const tests_run = b.addRunArtifact(tests_compile);
-
-    test_step.dependOn(&tests_run.step);
+    build_single_test(b, target, optimize, .{
+        .name = "test-fmt",
+        .desc = "Run formatter tests",
+        .entry = "src/root.zig",
+        .embeds = embeds,
+    });
 }
 
-fn build_step_cleanup(b: *std.Build) void {
-    const clean_step = b.step("clean", "Clean up");
+// CLEANUP / BUILD UTIL
 
-    clean_step.dependOn(&b.addRemoveDirTree(b.install_path).step);
-    if (@import("builtin").os.tag != .windows) {
-        clean_step.dependOn(&b.addRemoveDirTree(b.pathFromRoot(".zig-cache")).step);
+fn build_clean(b: *Build) void {
+    const step = b.step("clean", "Remove build system artifacts");
+
+    step.dependOn(&b.addRemoveDirTree(.{ .cwd_relative = b.install_path }).step);
+
+    if (builtin.os.tag != .windows) {
+        step.dependOn(&b.addRemoveDirTree(.{ .cwd_relative = ".zig-cache" }).step);
     } else {
-        clean_step.makeFn = CleanWindows;
+        step.makeFn = CleanWindows;
     }
 }
 
-fn CleanWindows(_: *std.Build.Step, _: std.Progress.Node) anyerror!void {
-    std.log.err("Clean step not supported on Windows. Run `./clean.bat` instead.", .{});
+fn CleanWindows(_: *Step, _: StepMakeOptions) anyerror!void {
+    // Windows locks `.zig-cache` during build, so we have to clean it outside the build system
+    std.log.err("Cannot remove `.zig-cache` during build process on Windows. Run `./clean.bat`", .{});
 }

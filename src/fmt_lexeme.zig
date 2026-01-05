@@ -17,8 +17,10 @@ pub const Opts = packed struct(u32) {
     _: u30 = 0,
 };
 
-kind: Kind = .None,
+kind: Kind,
 data: []const Token,
+
+pub const default: Lexeme = .{ .kind = .None, .data = &.{} };
 
 const ScopeOpener = "([{";
 const ScopeCloser = ")]}";
@@ -65,7 +67,7 @@ pub fn ParseTokens(
                     .String, .MathOp => {
                         emit_lexeme = .Word;
                     },
-                    else => unreachable,
+                    .Comment, .None, .Scope => unreachable,
                 }
             },
         }

@@ -25,13 +25,13 @@ pub fn StageTwoCheck(
     if (b_waiting.*) {
         if (ValueCheckOnce(ValT, out.*, out_default)) {
             switch (@typeInfo(ValT)) {
-                .Pointer => |t| {
+                .pointer => |t| {
                     comptime assert(t.is_const);
                     comptime assert(t.child == u8);
-                    comptime assert(t.size == .Slice);
+                    comptime assert(t.size == .slice);
                     out.* = alloc.dupe(u8, arg) catch out.*;
                 },
-                .Int => |t| {
+                .int => |t| {
                     comptime assert(t.signedness == .unsigned);
                     // overflow or wrong sign falls back to existing value
                     out.* = std.fmt.parseUnsigned(ValT, arg, 0) catch out.*;
@@ -93,13 +93,13 @@ pub fn RawCheck(arg: []const u8, comptime flags: []const []const u8) bool {
 /// check if a value is settable (it is not already set)
 pub fn ValueCheckOnce(comptime T: type, value: T, default: T) bool {
     switch (@typeInfo(T)) {
-        .Pointer => |t| {
+        .pointer => |t| {
             comptime assert(t.is_const);
             comptime assert(t.child == u8);
-            comptime assert(t.size == .Slice);
+            comptime assert(t.size == .slice);
             return BLAND(value.len == default.len, value.ptr == default.ptr);
         },
-        .Int => |t| {
+        .int => |t| {
             comptime assert(t.signedness == .unsigned);
             return value == default;
         },

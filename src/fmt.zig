@@ -6,45 +6,14 @@ const CLI = @import("utl_cli.zig");
 const Token = @import("fmt_token.zig");
 const Lexeme = @import("fmt_lexeme.zig");
 const Line = @import("fmt_line.zig");
+const Settings = @import("fmt_settings.zig");
 
 const BLAND = @import("utl_branchless.zig").BLAND;
 const IBLAND = @import("utl_branchless.zig").IBLAND;
 const BLOR = @import("utl_branchless.zig").BLOR;
-const IBLXOR = @import("utl_branchless.zig").IBLXOR;
 const BLSEL = @import("utl_branchless.zig").BLSEL;
 const BLSELE = @import("utl_branchless.zig").BLSELE;
 const utf8LineMeasuringWriter = @import("utl_utf8_line_measuring_writer.zig").utf8LineMeasuringWriter;
-
-pub const Settings = struct {
-    TabSize: usize = 4,
-
-    /// Maximum number of consecutive blank lines; large gaps will be folded to
-    /// this number. Lines with comments do not count toward blanks.
-    MaxBlankLines: usize = 2,
-
-    /// Comment column, when line is not a standalone comment.
-    TextComCol: usize = 40,
-
-    /// Columns to advance from start of label to instruction. Lines without a
-    /// label will ignore this setting and inset the instruction by TabSize.
-    TextInsMinAdv: usize = 12,
-
-    /// Columns to advance from start of instruction to operands.
-    TextOpsMinAdv: usize = 8,
-
-    /// Alternate values for ComCol, InsMinGap and OpsMinGap, used only in the
-    /// data-type section context (e.g. ".data", ".bss", ".tls").
-    DataComCol: usize = 60,
-    DataInsMinAdv: usize = 16,
-    DataOpsMinAdv: usize = 32,
-
-    /// Base indentation for different section contexts (e.g. "section .data").
-    /// Other offsets are added to these depending on the section type.
-    SecIndentNone: usize = 0,
-    SecIndentData: usize = 0,
-    SecIndentText: usize = 0,
-    SecIndentOther: usize = 0,
-};
 
 pub fn Formatter(
     comptime BUF_SIZE_LINE_IO: usize,
@@ -61,6 +30,9 @@ pub fn Formatter(
         var TokBufLine = std.mem.zeroes([BUF_SIZE_LINE_TOK]Token);
         var LexBufLine = std.mem.zeroes([BUF_SIZE_LINE_LEX]Lexeme);
 
+        // TODO: make line ctx as input? that way, we could return an error and
+        //  the caller can decide if/how to print the error wrt line information,
+        //  rather than baking the error printing into this function
         /// Generic formatter for NASM-like assembly. Reader must contain valid
         /// UTF-8 without BOM; lines with invalid UTF-8 codepoints will be piped
         /// out unformatted, input with BOM will be rejected entirely.
@@ -70,33 +42,34 @@ pub fn Formatter(
             err_writer: anytype,
             settings: Settings,
         ) !void {
+            var line_s = reader.readUntilDelimiterOrEof(&RawBufLine, '\n') catch null orelse return;
+            var line_i: usize = 0;
+
+            // TODO: dump file verbatim and post message to err_writer instead?
+            if (std.mem.startsWith(u8, line_s, &ByteOrderMark))
+                return error.SourceContainsBOM;
+
             var line_tok = std.ArrayListUnmanaged(Token).initBuffer(&TokBufLine);
             var line_lex = std.ArrayListUnmanaged(Lexeme).initBuffer(&LexBufLine);
             var out = utf8LineMeasuringWriter(writer);
             const out_w = out.writer();
 
-            var line_ctx = std.mem.zeroes(Line.Context);
-            line_ctx.Mode = .Blank;
-            line_ctx.Section = .None;
+            var line_ctx: Line.Context = .default;
             Line.CtxUpdateColumns(&line_ctx, &settings);
+            line_ctx.NewLineStr = "\r\n"[@intFromBool(!std.mem.endsWith(u8, line_s, "\r"))..];
 
             // TODO: line counter for output lines, use with WriteErrorMessage
             var line_ctx_prev = line_ctx;
             var blank_lines: usize = 0;
-            var line_i: usize = 0;
-            while (reader.readUntilDelimiterOrEof(&RawBufLine, '\n') catch null) |line_s| : (line_i += 1) {
-                defer {
-                    line_ctx_prev = line_ctx;
-                    line_ctx.ActualColFirst = 0;
-                    line_ctx.ActualColCom = 0;
-                    line_tok.clearRetainingCapacity();
-                    line_lex.clearRetainingCapacity();
-                }
-
-                // TODO: dump file verbatim and post message to err_writer instead?
-                if (line_i == 0 and std.mem.startsWith(u8, line_s, &ByteOrderMark))
-                    return error.SourceContainsBOM;
-
+            while (true) : ({
+                line_s = reader.readUntilDelimiterOrEof(&RawBufLine, '\n') catch null orelse break;
+                line_i += 1;
+                line_ctx_prev = line_ctx;
+                line_ctx.ActualColFirst = 0;
+                line_ctx.ActualColCom = 0;
+                line_tok.clearRetainingCapacity();
+                line_lex.clearRetainingCapacity();
+            }) {
                 if (!std.unicode.utf8ValidateSlice(line_s)) {
                     _ = out_w.write(line_s) catch break;
                     _ = out_w.write("\n") catch break;
@@ -108,11 +81,8 @@ pub fn Formatter(
                     var body_s = line_s[0..];
                     var com_s = line_s[line_s.len..];
 
-                    const b_crlf = std.mem.endsWith(u8, body_s, "\r");
-                    if (b_crlf)
-                        body_s = body_s[0 .. body_s.len - 1];
-                    if (line_ctx.NewLineStr.len == 0)
-                        line_ctx.NewLineStr = "\r\n"[IBLXOR(true, b_crlf)..];
+                    const b_crlf = body_s.len > 0 and body_s[body_s.len - 1] == '\r';
+                    body_s = body_s[0 .. body_s.len - @intFromBool(b_crlf)];
 
                     var scope: ?u8 = null;
                     var escaped = false;
@@ -180,13 +150,16 @@ pub fn Formatter(
                 Line.CtxUpdateSection(&line_ctx, line_lex.items, &settings);
 
                 switch (line_ctx.Mode) {
+                    .Source,
+                    => FormatSourceLine(&out_w, line_lex.items, &line_ctx) catch break,
                     .AsmDirective,
                     .PreProcDirective,
                     .Macro,
                     => FormatGenericDirectiveLine(&out_w, line_lex.items, &line_ctx) catch break,
-                    .Source,
-                    => FormatSourceLine(&out_w, line_lex.items, &line_ctx) catch break,
-                    else => unreachable,
+                    .Blank,
+                    .Comment,
+                    .Unknown,
+                    => unreachable,
                 }
 
                 // NOTE: assumes the comment slice will contain the leading semicolon
@@ -302,14 +275,14 @@ test "Format" {
     // TODO: complex nested alignment
     //--
     //    \\section .data
-    //    \\	FontTitle:
-    //    \\	istruc ScreenFont
-    //    \\		at ScreenFont.GlyphW,		db 7
-    //    \\		at ScreenFont.GlyphH,		db 12
-    //    \\		at ScreenFont.AdvanceX,		db 8
-    //    \\		at ScreenFont.AdvanceY,		db 16
-    //    \\		at ScreenFont.pGlyphs,		dd GlyphsTitle
-    //    \\	iend
+    //    \\    FontTitle:
+    //    \\    istruc ScreenFont
+    //    \\        at ScreenFont.GlyphW,       db 7
+    //    \\        at ScreenFont.GlyphH,       db 12
+    //    \\        at ScreenFont.AdvanceX,     db 8
+    //    \\        at ScreenFont.AdvanceY,     db 16
+    //    \\        at ScreenFont.pGlyphs,      dd GlyphsTitle
+    //    \\    iend
     //----
     // TODO: non-scoped math statements without separating spaces ?? the examples
     //  below would need 'equ' to be recognised by lexer as self-contained
@@ -577,7 +550,6 @@ test "Format" {
         },
         // pass through invalid utf-8 without formatting
         // https://stackoverflow.com/a/3886015
-        // FIXME: notify unformatted line via stderr
         .{
             .in = "section .text\n" ++
                 // invalid utf8 (codepoint malformed)
@@ -600,7 +572,6 @@ test "Format" {
                 "    mov     ebp, 16                     ; " ++ dummy32 ** 127 ++ dummy1 ** 17 ++ "\n",
         },
         // individual token size limits (256)
-        // FIXME: notify unformatted line via stderr
         .{
             .in = "section .text\n" ++
                 // long token
@@ -614,7 +585,6 @@ test "Format" {
         // line token buffer limits (1024)
         .{
             // line length token buffer overrun (line dumped verbatim)
-            // FIXME: notify unformatted line via stderr
             .in = "section .text\n" ++
                 "mov ebp, 16" ++ " [es:eax]" ** 256,
             .ex = "section .text\n" ++
@@ -629,7 +599,6 @@ test "Format" {
         // line lexeme buffer limits (512)
         .{
             // line length lexeme buffer overrun (line dumped verbatim)
-            // FIXME: notify unformatted line via stderr
             .in = "section .text\n" ++
                 "mov ebp, 16" ++ " a" ** 509,
             .ex = "section .text\n" ++
@@ -650,7 +619,7 @@ test "Format" {
         var output = std.ArrayList(u8).init(std.testing.allocator);
         defer output.deinit();
 
-        const result = fmt.Format(input.reader(), output.writer(), stde_w, .{});
+        const result = fmt.Format(input.reader(), output.writer(), stde_w, .default);
 
         if (t.err) |e| {
             try std.testing.expectError(e, result);

@@ -36,12 +36,12 @@ pub inline fn BLXOR(b1: bool, b2: bool) bool {
 
 /// Branchless switch on bool -> int
 pub inline fn BLSEL(b: bool, comptime T: type, n1: T, n2: T) T {
-    comptime assert(@typeInfo(T) == .Int);
+    comptime assert(@typeInfo(T) == .int);
     return @intFromBool(b) * n1 + @intFromBool(!b) * n2;
 }
 
 /// Branchless switch on bool -> enum
 pub inline fn BLSELE(b: bool, comptime T: type, v1: T, v2: T) T {
-    comptime assert(@typeInfo(T) == .Enum);
+    comptime assert(@typeInfo(T) == .@"enum");
     return @enumFromInt(@intFromBool(b) * @intFromEnum(v1) + @intFromBool(!b) * @intFromEnum(v2));
 }

@@ -21,7 +21,8 @@ const EnumCheckOnce = @import("utl_cli.zig").EnumCheckOnce;
 const BoolCheck = @import("utl_cli.zig").BoolCheck;
 const RawCheck = @import("utl_cli.zig").RawCheck;
 
-const FormatSettings = @import("fmt.zig").Settings;
+// TODO: use exported module internally too (conflict with utl_branchless being shared)
+const FormatSettings = @import("root.zig").Settings;
 const VERSION_STRING = @import("app_version.zig").VERSION_STRING;
 
 // TODO: ?? accept input file without tag only if in first position, and require
@@ -109,24 +110,9 @@ bShowHelp: bool,
 /// IFile and rename OFile in response to this being true.
 bIOFileSame: bool,
 
-// FIXME: conv to decl literal when migrating to 0.14
-const def_fmt = FormatSettings{
-    .TabSize = 4,
-    .MaxBlankLines = 2,
-    .TextComCol = 40,
-    .TextInsMinAdv = 12,
-    .TextOpsMinAdv = 8,
-    .DataComCol = 60,
-    .DataInsMinAdv = 16,
-    .DataOpsMinAdv = 32,
-    .SecIndentNone = 0,
-    .SecIndentData = 0,
-    .SecIndentText = 0,
-    .SecIndentOther = 0,
-};
+const def_fmt = FormatSettings.default;
 
-// FIXME: conv to decl literal when migrating to 0.14
-const def_settings = AppSettings{
+pub const default: AppSettings = .{
     .Format = def_fmt,
     .bAllowTty = false,
     .bShowHelp = false,
@@ -152,6 +138,22 @@ const Waiters = struct {
     sit: bool = false,
     sio: bool = false,
 
+    pub const default: Waiters = .{
+        .fo = false,
+        .ts = false,
+        .mbl = false,
+        .tcc = false,
+        .tia = false,
+        .toa = false,
+        .dcc = false,
+        .dia = false,
+        .doa = false,
+        .sin = false,
+        .sid = false,
+        .sit = false,
+        .sio = false,
+    };
+
     pub fn AnyWaiting(self: *const Waiters) bool {
         var cnt_true: usize = 0;
         inline for (std.meta.fields(Waiters)) |f| {
@@ -175,11 +177,11 @@ pub fn ParseCLI(alloc: Allocator, args: anytype) !AppSettings {
     var b_allow_tty = false;
     var b_show_help = false;
     var b_io_file_same = false;
-    var fmt = FormatSettings{};
+    var fmt = def_fmt;
     errdefer alloc.free(i_file);
     errdefer alloc.free(o_file);
 
-    var waiters = std.mem.zeroes(Waiters);
+    var waiters: Waiters = .default;
 
     //_ = args.next(); // executable location in argv[0] should be skipped before running this
     while (args.next()) |arg| {
@@ -273,7 +275,7 @@ pub fn Deinit(self: *AppSettings, alloc: Allocator) void {
 test "App Settings" {
     const AppSettingsTestCase = struct {
         in: []const u8,
-        ex: AppSettings = def_settings,
+        ex: AppSettings = .default,
         err: ?Error = null,
     };
 
@@ -296,7 +298,7 @@ test "App Settings" {
             // file -> replace file
             .in = "filename",
             .ex = blk: {
-                var ex = def_settings;
+                var ex: AppSettings = .default;
                 ex.IFile = "filename";
                 ex.IKind = .File;
                 ex.OFile = "filename.tmp";
@@ -309,7 +311,7 @@ test "App Settings" {
             // file -> replace file (two commands)
             .in = "filename -fo filename",
             .ex = blk: {
-                var ex = def_settings;
+                var ex: AppSettings = .default;
                 ex.IFile = "filename";
                 ex.IKind = .File;
                 ex.OFile = "filename.tmp";
@@ -322,7 +324,7 @@ test "App Settings" {
             // file -> new file
             .in = "filename1 -fo filename2",
             .ex = blk: {
-                var ex = def_settings;
+                var ex: AppSettings = .default;
                 ex.IFile = "filename1";
                 ex.IKind = .File;
                 ex.OFile = "filename2";
@@ -334,7 +336,7 @@ test "App Settings" {
             // stdin -> file
             .in = "-fo filename",
             .ex = blk: {
-                var ex = def_settings;
+                var ex: AppSettings = .default;
                 ex.OFile = "filename";
                 ex.OKind = .File;
                 break :blk ex;
@@ -344,7 +346,7 @@ test "App Settings" {
             // file -> stdout
             .in = "filename -co",
             .ex = blk: {
-                var ex = def_settings;
+                var ex: AppSettings = .default;
                 ex.IFile = "filename";
                 ex.IKind = .File;
                 break :blk ex;
@@ -354,7 +356,7 @@ test "App Settings" {
             // help shorthand
             .in = "-h",
             .ex = blk: {
-                var ex = def_settings;
+                var ex: AppSettings = .default;
                 ex.bShowHelp = true;
                 break :blk ex;
             },
@@ -363,7 +365,7 @@ test "App Settings" {
             // help long form
             .in = "--help",
             .ex = blk: {
-                var ex = def_settings;
+                var ex: AppSettings = .default;
                 ex.bShowHelp = true;
                 break :blk ex;
             },
@@ -372,7 +374,7 @@ test "App Settings" {
             // tty shorthand
             .in = "-tty",
             .ex = blk: {
-                var ex = def_settings;
+                var ex: AppSettings = .default;
                 ex.bAllowTty = true;
                 break :blk ex;
             },
@@ -381,7 +383,7 @@ test "App Settings" {
             // tty long form
             .in = "--allow-tty",
             .ex = blk: {
-                var ex = def_settings;
+                var ex: AppSettings = .default;
                 ex.bAllowTty = true;
                 break :blk ex;
             },
@@ -393,7 +395,7 @@ test "App Settings" {
                 " -dcc 106 -dia 107 -doa 108" ++
                 " -sin 109 -sid 110 -sit 111 -sio 112",
             .ex = blk: {
-                var ex = def_settings;
+                var ex: AppSettings = .default;
                 ex.Format.TabSize = 101;
                 ex.Format.MaxBlankLines = 102;
                 ex.Format.TextComCol = 103;
@@ -417,7 +419,7 @@ test "App Settings" {
                 " --section-indent-none 109 --section-indent-data 110" ++
                 " --section-indent-text 111 --section-indent-other 112",
             .ex = blk: {
-                var ex = def_settings;
+                var ex: AppSettings = .default;
                 ex.Format.TabSize = 101;
                 ex.Format.MaxBlankLines = 102;
                 ex.Format.TextComCol = 103;
@@ -444,7 +446,7 @@ test "App Settings" {
                 " -dcc 118 -dia 119 -doa 120" ++
                 " -sin 121 -sid 122 -sit 123 -sio 124",
             .ex = blk: {
-                var ex = def_settings;
+                var ex: AppSettings = .default;
                 ex.Format.TabSize = 101;
                 ex.Format.MaxBlankLines = 102;
                 ex.Format.TextComCol = 103;
@@ -464,7 +466,7 @@ test "App Settings" {
             // file output apply once
             .in = "-fo filename1 -fo filename2",
             .ex = blk: {
-                var ex = def_settings;
+                var ex: AppSettings = .default;
                 ex.OFile = "filename1";
                 ex.OKind = .File;
                 break :blk ex;
@@ -475,7 +477,7 @@ test "App Settings" {
             //  the value is already set?
             .in = "filename1 filename2",
             .ex = blk: {
-                var ex = def_settings;
+                var ex: AppSettings = .default;
                 ex.IFile = "filename1";
                 ex.IKind = .File;
                 ex.OFile = "filename1.tmp";
