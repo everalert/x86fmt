@@ -101,7 +101,7 @@ pub fn CtxParseMode(
             break :str .Source;
         },
         .Scope => BLSELE(tok.data[0] == '[', Mode, .AsmDirective, .Unknown),
-        else => .Unknown,
+        .None, .Comment, .Backslash, .Comma, .MathOp => .Unknown,
     };
 }
 
