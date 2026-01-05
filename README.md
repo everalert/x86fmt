@@ -10,6 +10,66 @@ the friction of getting code to look consistent (automatic). There seemed to be
 no reasonably good standalone assembly formatter that just works for this use case, 
 so I made one for myself.
 
+## Demo
+
+### Input
+
+```asm
+global main
+
+section .data
+
+string db "NewBoston"
+stringLen equ ($-string)
+
+section .text
+
+main:
+mov rbp, rsp; for correct debugging
+mov eax, string; Address of the first element
+lea ebx, [string + stringLen-1] ; Address of the last element
+mov ecx, stringLen/2 ; condition for our loop
+reverse:
+movzx rdi, byte [eax] ; now contain "N" char
+movzx rsi, byte [ebx] ; now contain "n" char
+mov [eax],sil
+mov [ebx],dil 
+inc eax
+dec ebx
+dec ecx
+cmp ecx, 0
+jne reverse
+```
+
+### Output
+
+```asm
+global main
+
+section .data
+
+    string                          db "NewBoston"
+    stringLen                       equ ($-string)
+
+section .text
+
+main:
+    mov     rbp, rsp                    ; for correct debugging
+    mov     eax, string                 ; Address of the first element
+    lea     ebx, [string+stringLen-1]   ; Address of the last element
+    mov     ecx, stringLen/2            ; condition for our loop
+reverse:
+    movzx   rdi, byte [eax]             ; now contain "N" char
+    movzx   rsi, byte [ebx]             ; now contain "n" char
+    mov     [eax], sil
+    mov     [ebx], dil
+    inc     eax
+    dec     ebx
+    dec     ecx
+    cmp     ecx, 0
+    jne     reverse
+```
+
 ## Installation
 
 1. Download a release, or compile with `zig build -Doptimize=ReleaseFast`. 
@@ -49,27 +109,14 @@ x86fmt source.s -co
 
 ### Zig Module
 
-Zig users can also import the formatter core as a module via the Zig package manager. 
-
-The module uses the package manager semantics introduced in `zig 0.14.0`. Use the 
-following command to add it to your `build.zig.zon`:
-
-```
-zig fetch --save git+https://github.com/everalert/x86fmt#v1.0.0
-```
+Zig users can also import the formatter core as a module via the Zig package 
+manager. See the [MANUAL](MANUAL.md#zig-module) for details.
 
 ## Additional Notes
 
 Some caveats and things to be aware of that don't quite fit in their own
 section:
 
-- Full length of NASM identifiers is not supported. At the time of writing, per-line
-  limitations are: 4095 bytes, 1024 tokens, 1024 lexemes, 256 bytes per token.
-	- If these limits are exceeded, formatting will be aborted and only formatted 
-      lines before that point will be returned. This behaviour will likely change
-      in future to be less user-hostile.
-    - These limits are chosen more or less arbitrarily, and are intended to be 
-      mostly removed in a future rewrite of the formatter core.
 - Minimal semantic analysis. In particular, instructions and most directives are
   not identified by keyword.
     - Token semantics are differentiated primarily by form, and no attempt is made 
@@ -80,12 +127,6 @@ section:
 - Some more complicated formatting situations still look weird, particularly to 
   do with nested indentation such as `struc` instancing. This will be addressed
   in a future rewrite of the formatter core.
-- UTF-8 input is enforced, to match NASM requirements. Individual lines with invalid 
-  UTF-8 will be passed through unformatted. If the input contains the byte order 
-  mark, formatting will be aborted (this will likely change to just passing through 
-  the whole input unformatted too). 
-- When using `stdin` via terminal emulator with the `-tty` flag, the tty pipe must 
-  be closed manually before the text will be formatted; use `ctrl-c` after a newline.
 - The formatter will likely be suitable for any Intel-like syntax such as MASM,
   but note that this is not a guarantee.
 
