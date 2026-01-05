@@ -112,6 +112,24 @@ x86fmt source.s -co
 Zig users can also import the formatter core as a module via the Zig package 
 manager. See the [MANUAL](MANUAL.md#zig-module) for details.
 
+### Testing
+
+Tests can be run using the following commands. As with compilation, tests require
+`zig 0.14.1`:
+
+```batch
+:: Run all tests, including codebase tests not covered by 
+:: test-exe or test-fmt
+zig build test
+
+:: Run tests on the application behaviour
+zig build test-exe
+
+:: Run tests on the formatter core
+zig build test-fmt
+
+```
+
 ## Additional Notes
 
 Some caveats and things to be aware of that don't quite fit in their own

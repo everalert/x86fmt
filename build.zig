@@ -129,8 +129,8 @@ fn build_tests(b: *Build, target: ResolvedTarget, optimize: OptimizeMode) void {
     });
 
     build_single_test(b, target, optimize, .{
-        .name = "test-module",
-        .desc = "Run module tests",
+        .name = "test-fmt",
+        .desc = "Run formatter tests",
         .entry = "src/root.zig",
         .embeds = embeds,
     });
