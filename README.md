@@ -12,7 +12,9 @@ so I made one for myself.
 
 ## Demo
 
-### Input
+<table>
+<tr><td>Input</td><td>Output</td></tr>
+<tr><td>
 
 ```asm
 global main
@@ -41,7 +43,7 @@ cmp ecx, 0
 jne reverse
 ```
 
-### Output
+</td><td>
 
 ```asm
 global main
@@ -69,6 +71,9 @@ reverse:
     cmp     ecx, 0
     jne     reverse
 ```
+
+</td></tr>
+</table>
 
 ## Installation
 
