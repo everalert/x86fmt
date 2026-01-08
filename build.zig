@@ -16,7 +16,7 @@ comptime {
     const req_zig = std.SemanticVersion.parse(manifest.required_zig_version) catch unreachable;
     const cur_zig = builtin.zig_version;
     if (cur_zig.order(req_zig) != .eq) {
-        const error_message = "Invalid Zig version ({}). Please use {}.\n";
+        const error_message = "Invalid Zig version ({f}). Please use {f}.\n";
         @compileError(std.fmt.comptimePrint(error_message, .{ cur_zig, req_zig }));
     }
 }

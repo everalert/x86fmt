@@ -20,7 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Nothing yet!
+### Changed
+
+- Updated Zig version from `0.14.1` to `0.15.2`.
 
 
 ## [1.0.0] - 2026-01-05

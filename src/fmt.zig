@@ -37,9 +37,9 @@ pub fn Formatter(
         /// UTF-8 without BOM; lines with invalid UTF-8 codepoints will be piped
         /// out unformatted, input with BOM will be rejected entirely.
         pub fn Format(
-            reader: anytype,
-            writer: anytype,
-            err_writer: anytype,
+            reader: *std.Io.Reader,
+            writer: *std.Io.Writer,
+            err_writer: *std.Io.Writer,
             settings: Settings,
         ) !void {
             var line_s = reader.readUntilDelimiterOrEof(&RawBufLine, '\n') catch null orelse return;
@@ -229,7 +229,12 @@ pub fn Formatter(
         }
 
         /// @line   zero-indexed line number
-        fn WriteErrorMessage(writer: anytype, line: usize, label: []const u8, error_message: []const u8) !void {
+        fn WriteErrorMessage(
+            writer: *std.Io.Writer,
+            line: usize,
+            label: []const u8,
+            error_message: []const u8,
+        ) !void {
             try writer.print("L{d:0>4}: {s} ({s})\n", .{ line + 1, label, error_message });
         }
     };
