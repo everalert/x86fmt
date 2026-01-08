@@ -90,7 +90,13 @@ const TestDef = struct {
     imports: []const ModuleImport,
 };
 
-fn build_single_test(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, testdef: TestDef) void {
+fn build_single_test(
+    b: *Build,
+    target: ResolvedTarget,
+    optimize: OptimizeMode,
+    run_test: bool,
+    testdef: TestDef,
+) void {
     const step = b.step(testdef.name, testdef.desc);
 
     const compile = b.addTest(.{
@@ -102,12 +108,17 @@ fn build_single_test(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, 
         }),
     });
 
-    const run = b.addRunArtifact(compile);
-
-    step.dependOn(&run.step);
+    if (run_test) {
+        b.getInstallStep().dependOn(&compile.step);
+    } else {
+        const run = b.addRunArtifact(compile);
+        step.dependOn(&run.step);
+    }
 }
 
 fn build_tests(b: *Build, target: ResolvedTarget, optimize: OptimizeMode) void {
+    const no_run = b.option(bool, "no-run", "skip running tests") orelse false;
+
     const imports_embeds: []const ModuleImport = blk: {
         const files: []const struct { []const u8, []const u8 } = &.{
             .{ "build.zig.zon", "build.zig.zon" },
@@ -126,21 +137,21 @@ fn build_tests(b: *Build, target: ResolvedTarget, optimize: OptimizeMode) void {
         break :blk &modules;
     };
 
-    build_single_test(b, target, optimize, .{
+    build_single_test(b, target, optimize, !no_run, .{
         .name = "test",
         .desc = "Run all tests, including tests not covered by test-exe or test-module",
         .entry = "src/test.zig",
         .imports = imports_embeds,
     });
 
-    build_single_test(b, target, optimize, .{
+    build_single_test(b, target, optimize, !no_run, .{
         .name = "test-exe",
         .desc = "Run executable tests",
         .entry = "src/main.zig",
         .imports = imports_embeds,
     });
 
-    build_single_test(b, target, optimize, .{
+    build_single_test(b, target, optimize, !no_run, .{
         .name = "test-fmt",
         .desc = "Run formatter tests",
         .entry = "src/root.zig",

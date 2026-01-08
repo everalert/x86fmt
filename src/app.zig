@@ -266,14 +266,14 @@ test "App Main" {
                     // FIXME: thought you can do tty tests with `.allow_ctty = true`
                     //  here, but it seems not; need to figure out how
                     .Console => try tmpdir.dir.openFile(input_file, .{}),
-                    .File => std.io.getStdIn(), // dummy File
+                    .File => std.fs.File.stdin(), // dummy File
                 };
             };
             defer if (t.in == .Console) input.close();
 
             const output = switch (t.out) {
                 .Console => try tmpdir.dir.createFile(output_file_buf, .{}),
-                .File => std.io.getStdOut(), // dummy File
+                .File => std.fs.File.stdout(), // dummy File
             };
             defer if (t.out == .Console) output.close();
 

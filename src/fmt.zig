@@ -253,7 +253,8 @@ pub fn Formatter(
 // TODO: stderr tests (either here or in app main, probably here tho)
 test "Format" {
     std.testing.log_level = .debug;
-    const stde_w = std.io.null_writer;
+    const null_writer = std.Io.Writer.Discarding.init(&.{});
+    var stde_w = null_writer.writer;
 
     const BUF_SIZE_LINE_IO = 4096; // NOTE: meant to be 4095; std bug in Reader.readUntilDelimiterOrEof
     const BUF_SIZE_LINE_TOK = 1024;
@@ -624,10 +625,13 @@ test "Format" {
         errdefer std.debug.print("FAILED {d:0>2}\n\n", .{i});
 
         var input = std.io.fixedBufferStream(t.in);
-        var output = std.ArrayList(u8).init(std.testing.allocator);
-        defer output.deinit();
+        var output = try std.ArrayList(u8).initCapacity(std.testing.allocator, 0);
+        defer output.deinit(std.testing.allocator);
 
-        const result = fmt.Format(input.reader(), output.writer(), stde_w, .default);
+        var input_reader = input.reader().adaptToNewApi(&.{});
+        var output_writer = output.writer(std.testing.allocator).adaptToNewApi(&.{});
+
+        const result = fmt.Format(&input_reader.new_interface, &output_writer.new_interface, &stde_w, .default);
 
         if (t.err) |e| {
             try std.testing.expectError(e, result);

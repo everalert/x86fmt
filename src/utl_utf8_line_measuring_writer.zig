@@ -62,7 +62,7 @@ pub fn write(self: *LineMeasuringWriter, bytes: []const u8) anyerror!usize {
 test "Utf8LineMeasuringWriter" {
     // no newline
     var null_writer = std.Io.Writer.Discarding.init(&.{});
-    var line_measuring_stream = LineMeasuringWriter.Init(&null_writer);
+    var line_measuring_stream = LineMeasuringWriter.Init(&null_writer.writer);
     const stream = line_measuring_stream.Writer();
     const bytes = "yay" ** 100;
     try stream.writeAll(bytes);
