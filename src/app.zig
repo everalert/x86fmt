@@ -16,6 +16,10 @@ const BUF_SIZE_LINE_TOK = 1024;
 const BUF_SIZE_LINE_LEX = 512;
 const BUF_SIZE_TOK = 256;
 
+var STDI_BUF = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
+var STDO_BUF = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
+var STDE_BUF = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
+
 /// @args   *ArgIterator or *ArgIteratorGeneral from std.process
 ///         assumes argument containing executable name is already skipped
 /// @stdi   stdin File
@@ -23,13 +27,17 @@ const BUF_SIZE_TOK = 256;
 /// @stde   stderr File
 pub fn Main(alloc: Allocator, args: anytype, stdi: File, stdo: File, stde: File) !void {
     var settings = AppSettings.ParseCLI(alloc, args) catch |err| {
-        try stde.writer().print("Settings Error ({s})", .{@errorName(err)});
+        var w = stde.writer(&STDE_BUF);
+        defer w.interface.flush() catch {};
+        try w.interface.print("Settings Error ({s})", .{@errorName(err)});
         return;
     };
     defer settings.Deinit(alloc);
 
     if (settings.bShowHelp) {
-        _ = try stdo.writer().write(AppSettings.HelpText);
+        var w = stdo.writer(&STDO_BUF);
+        defer w.interface.flush() catch {};
+        _ = try w.interface.write(AppSettings.HelpText);
         return;
     }
 
@@ -38,29 +46,31 @@ pub fn Main(alloc: Allocator, args: anytype, stdi: File, stdo: File, stde: File)
             .File => try std.fs.cwd().openFile(settings.IFile, .{}),
             .Console => c: {
                 if (BLAND(!settings.bAllowTty, stdi.isTty())) {
-                    _ = try stdo.writer().write(AppSettings.HelpTextShort);
+                    var w = stdo.writer(&STDO_BUF);
+                    defer w.interface.flush() catch {};
+                    _ = try w.interface.write(AppSettings.HelpTextShort);
                     return;
                 }
                 break :c stdi;
             },
         };
         defer if (settings.IKind == .File) fi.close();
-        var br = std.io.bufferedReader(fi.reader());
+        var br = fi.reader(&STDI_BUF);
 
         const fo = switch (settings.OKind) {
             .File => try std.fs.cwd().createFile(settings.OFile, .{}),
             .Console => stdo,
         };
         defer if (settings.OKind == .File) fo.close();
-        var bw = std.io.bufferedWriter(fo.writer());
-        defer bw.flush() catch {};
+        var bw = fo.writer(&STDO_BUF);
+        defer bw.interface.flush() catch {};
 
-        var bew = std.io.bufferedWriter(stde.writer());
-        defer bew.flush() catch {};
+        var bew = stde.writer(&STDE_BUF);
+        defer bew.interface.flush() catch {};
 
         const fmt = Formatter(BUF_SIZE_LINE_IO, BUF_SIZE_LINE_TOK, BUF_SIZE_LINE_LEX, BUF_SIZE_TOK);
-        fmt.Format(br.reader(), bw.writer(), bew.writer(), settings.Format) catch |err| {
-            try stde.writer().print("Formatting Error ({s})", .{@errorName(err)});
+        fmt.Format(&br.interface, &bw.interface, &bew.interface, settings.Format) catch |err| {
+            try bew.interface.print("Formatting Error ({s})", .{@errorName(err)});
         };
     }
 

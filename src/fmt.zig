@@ -13,7 +13,7 @@ const IBLAND = @import("utl_branchless.zig").IBLAND;
 const BLOR = @import("utl_branchless.zig").BLOR;
 const BLSEL = @import("utl_branchless.zig").BLSEL;
 const BLSELE = @import("utl_branchless.zig").BLSELE;
-const utf8LineMeasuringWriter = @import("utl_utf8_line_measuring_writer.zig").utf8LineMeasuringWriter;
+const Utf8LineMeasuringWriter = @import("utl_utf8_line_measuring_writer.zig");
 
 pub fn Formatter(
     comptime BUF_SIZE_LINE_IO: usize,
@@ -21,12 +21,14 @@ pub fn Formatter(
     comptime BUF_SIZE_LINE_LEX: usize,
     comptime BUF_SIZE_TOK: usize,
 ) type {
+    // FIXME: remove these, not used anymore
+    _ = BUF_SIZE_LINE_IO;
+
     return struct {
         pub const Error = error{SourceContainsBOM};
         const ByteOrderMark = [3]u8{ 0xEF, 0xBB, 0xBF };
 
         // TODO: ring buffer, to support line lookback
-        var RawBufLine = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
         var TokBufLine = std.mem.zeroes([BUF_SIZE_LINE_TOK]Token);
         var LexBufLine = std.mem.zeroes([BUF_SIZE_LINE_LEX]Lexeme);
 
@@ -42,7 +44,7 @@ pub fn Formatter(
             err_writer: *std.Io.Writer,
             settings: Settings,
         ) !void {
-            var line_s = reader.readUntilDelimiterOrEof(&RawBufLine, '\n') catch null orelse return;
+            var line_s = reader.takeDelimiter('\n') catch null orelse return;
             var line_i: usize = 0;
 
             // TODO: dump file verbatim and post message to err_writer instead?
@@ -51,8 +53,8 @@ pub fn Formatter(
 
             var line_tok = std.ArrayListUnmanaged(Token).initBuffer(&TokBufLine);
             var line_lex = std.ArrayListUnmanaged(Lexeme).initBuffer(&LexBufLine);
-            var out = utf8LineMeasuringWriter(writer);
-            const out_w = out.writer();
+            var line_tracker = Utf8LineMeasuringWriter.Init(writer);
+            var out_w = line_tracker.Writer();
 
             var line_ctx: Line.Context = .default;
             Line.CtxUpdateColumns(&line_ctx, &settings);
@@ -62,7 +64,8 @@ pub fn Formatter(
             var line_ctx_prev = line_ctx;
             var blank_lines: usize = 0;
             while (true) : ({
-                line_s = reader.readUntilDelimiterOrEof(&RawBufLine, '\n') catch null orelse break;
+                //reader.rebase(reader.buffer.len);
+                line_s = reader.takeDelimiter('\n') catch null orelse break;
                 line_i += 1;
                 line_ctx_prev = line_ctx;
                 line_ctx.ActualColFirst = 0;
@@ -125,8 +128,8 @@ pub fn Formatter(
                 // TODO: smart comment positioning based on prev/next lines
                 if (BLAND(body.len == 0, comment.len > 0)) {
                     const colcom = @max(line_ctx_prev.ActualColCom, line_ctx_prev.ActualColFirst);
-                    out.PadSpaces(colcom, 0) catch break;
-                    line_ctx.ActualColCom = out.LineLen;
+                    line_tracker.PadSpaces(colcom, 0) catch break;
+                    line_ctx.ActualColCom = line_tracker.LineLen;
                     _ = out_w.write(comment) catch break;
                     _ = out_w.write(line_ctx.NewLineStr) catch break;
                     continue;
@@ -164,12 +167,12 @@ pub fn Formatter(
 
                 // NOTE: assumes the comment slice will contain the leading semicolon
                 if (comment.len > 0) {
-                    out.PadSpaces(line_ctx.ColCom, 1) catch break;
-                    line_ctx.ActualColCom = out.LineLen;
+                    line_tracker.PadSpaces(line_ctx.ColCom, 1) catch break;
+                    line_ctx.ActualColCom = line_tracker.LineLen;
                     _ = out_w.write(comment) catch break;
                 }
 
-                line_ctx.ActualColFirst = out.LineLws;
+                line_ctx.ActualColFirst = line_tracker.LineLws;
                 _ = out_w.write(line_ctx.NewLineStr) catch break;
             }
         }
