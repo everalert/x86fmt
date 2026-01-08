@@ -83,20 +83,20 @@ const TestDef = struct {
     name: []const u8,
     desc: []const u8,
     entry: []const u8,
-    embeds: []const TestEmbed,
+    imports: []const ModuleImport,
 };
 
 fn build_single_test(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, testdef: TestDef) void {
     const step = b.step(testdef.name, testdef.desc);
 
     const compile = b.addTest(.{
-        .root_source_file = b.path(testdef.entry),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path(testdef.entry),
+            .imports = testdef.imports,
+            .target = target,
+            .optimize = optimize,
+        }),
     });
-
-    for (testdef.embeds) |embed|
-        compile.root_module.addAnonymousImport(embed[0], embed[1]);
 
     const run = b.addRunArtifact(compile);
 
@@ -104,35 +104,43 @@ fn build_single_test(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, 
 }
 
 fn build_tests(b: *Build, target: ResolvedTarget, optimize: OptimizeMode) void {
-    const embeds = &[_]TestEmbed{
-        .{ "build.zig.zon", .{ .root_source_file = b.path("build.zig.zon") } },
-        .{ "testfile_app_all", .{ .root_source_file = b.path("testing/app.all.asmtest") } },
-        .{ "testfile_app_base", .{ .root_source_file = b.path("testing/app.base.asmtest") } },
-        .{ "testfile_app_default", .{ .root_source_file = b.path("testing/app.default.asmtest") } },
-        .{ "testfile_fmt_all", .{ .root_source_file = b.path("testing/fmt.all.asmtest") } },
-        .{ "testfile_fmt_base", .{ .root_source_file = b.path("testing/fmt.base.asmtest") } },
-        .{ "testfile_fmt_default", .{ .root_source_file = b.path("testing/fmt.default.asmtest") } },
+    const imports_embeds: []const ModuleImport = blk: {
+        const files: []const struct { []const u8, []const u8 } = &.{
+            .{ "build.zig.zon", "build.zig.zon" },
+            .{ "testfile_app_all", "testing/app.all.asmtest" },
+            .{ "testfile_app_base", "testing/app.base.asmtest" },
+            .{ "testfile_app_default", "testing/app.default.asmtest" },
+            .{ "testfile_fmt_all", "testing/fmt.all.asmtest" },
+            .{ "testfile_fmt_base", "testing/fmt.base.asmtest" },
+            .{ "testfile_fmt_default", "testing/fmt.default.asmtest" },
+        };
+        var modules: [files.len]ModuleImport = undefined;
+        for (files, 0..) |file, i| modules[i] = .{
+            .name = file.@"0",
+            .module = b.createModule(.{ .root_source_file = b.path(file.@"1") }),
+        };
+        break :blk &modules;
     };
 
     build_single_test(b, target, optimize, .{
         .name = "test",
         .desc = "Run all tests, including tests not covered by test-exe or test-module",
         .entry = "src/test.zig",
-        .embeds = embeds,
+        .imports = imports_embeds,
     });
 
     build_single_test(b, target, optimize, .{
         .name = "test-exe",
         .desc = "Run executable tests",
         .entry = "src/main.zig",
-        .embeds = embeds,
+        .imports = imports_embeds,
     });
 
     build_single_test(b, target, optimize, .{
         .name = "test-fmt",
         .desc = "Run formatter tests",
         .entry = "src/root.zig",
-        .embeds = embeds,
+        .imports = imports_embeds,
     });
 }
 
