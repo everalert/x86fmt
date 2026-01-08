@@ -69,7 +69,11 @@ fn build_binary(
 
     bin.root_module.addAnonymousImport("build.zig.zon", .{ .root_source_file = b.path("build.zig.zon") });
 
-    b.installArtifact(bin);
+    if (b.option(bool, "no-bin", "skip emitting binary") orelse false) {
+        b.getInstallStep().dependOn(&bin.step);
+    } else {
+        b.installArtifact(bin);
+    }
 }
 
 // TESTS
