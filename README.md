@@ -78,7 +78,7 @@ reverse:
 ## Installation
 
 1. Download a release, or compile with `zig build -Doptimize=ReleaseFast`. 
-   Compilation requires `zig 0.14.1`.
+   Compilation requires `zig 0.15.2`.
 2. Move the binary to a location accessible to your `PATH`.
 3. (Optional) Configure your code editor to run `x86fmt` in a code action, such
    as format-on-save. Refer to [Usage](#usage) and the [MANUAL](MANUAL.md) for 
@@ -120,7 +120,7 @@ manager. See the [MANUAL](MANUAL.md#zig-module) for details.
 ### Testing
 
 Tests can be run using the following commands. As with compilation, tests require
-`zig 0.14.1`:
+`zig 0.15.2`:
 
 ```batch
 :: Run all tests, including codebase tests not covered by 

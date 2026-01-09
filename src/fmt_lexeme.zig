@@ -6,6 +6,7 @@ const assert = std.debug.assert;
 const Token = @import("fmt_token.zig");
 const BLAND = @import("utl_branchless.zig").BLAND;
 const BLOR = @import("utl_branchless.zig").BLOR;
+const Utf8LineMeasuringWriter = @import("utl_utf8_line_measuring_writer.zig");
 
 pub const Kind = enum(u8) { None, Word, Separator };
 
@@ -139,7 +140,7 @@ test "Parse" {
 /// appends the contents of a lexeme to a byte array, advancing the provided
 /// utf-8 codepoint counter
 pub inline fn BufAppend(
-    writer: anytype, // Utf8LineMeasuringWriter.Writer
+    writer: *Utf8LineMeasuringWriter.WriterType,
     lex: *const Lexeme,
     i: *usize,
     comptime BUF_SIZE_TOK: usize,
@@ -150,7 +151,7 @@ pub inline fn BufAppend(
 /// appends the contents of a lexeme to a byte array, advancing the provided
 /// utf-8 codepoint counter
 pub fn BufAppendOpts(
-    writer: anytype, // Utf8LineMeasuringWriter.Writer
+    writer: *Utf8LineMeasuringWriter.WriterType,
     lex: *const Lexeme,
     i: *usize,
     opts: Lexeme.Opts,
@@ -190,7 +191,7 @@ pub fn BufAppendOpts(
 /// appends a series of lexemes to a byte array, advancing the provided utf-8
 /// codepoint counter
 pub fn BufAppendSlice(
-    writer: anytype, // Utf8LineMeasuringWriter.Writer
+    writer: *Utf8LineMeasuringWriter.WriterType,
     lexemes: []const Lexeme,
     i: *usize,
     opts: Lexeme.Opts,

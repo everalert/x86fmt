@@ -16,7 +16,7 @@ comptime {
     const req_zig = std.SemanticVersion.parse(manifest.required_zig_version) catch unreachable;
     const cur_zig = builtin.zig_version;
     if (cur_zig.order(req_zig) != .eq) {
-        const error_message = "Invalid Zig version ({}). Please use {}.\n";
+        const error_message = "Invalid Zig version ({f}). Please use {f}.\n";
         @compileError(std.fmt.comptimePrint(error_message, .{ cur_zig, req_zig }));
     }
 }
@@ -69,7 +69,11 @@ fn build_binary(
 
     bin.root_module.addAnonymousImport("build.zig.zon", .{ .root_source_file = b.path("build.zig.zon") });
 
-    b.installArtifact(bin);
+    if (b.option(bool, "no-bin", "skip emitting binary") orelse false) {
+        b.getInstallStep().dependOn(&bin.step);
+    } else {
+        b.installArtifact(bin);
+    }
 }
 
 // TESTS
@@ -83,56 +87,75 @@ const TestDef = struct {
     name: []const u8,
     desc: []const u8,
     entry: []const u8,
-    embeds: []const TestEmbed,
+    imports: []const ModuleImport,
 };
 
-fn build_single_test(b: *Build, target: ResolvedTarget, optimize: OptimizeMode, testdef: TestDef) void {
+fn build_single_test(
+    b: *Build,
+    target: ResolvedTarget,
+    optimize: OptimizeMode,
+    run_test: bool,
+    testdef: TestDef,
+) void {
     const step = b.step(testdef.name, testdef.desc);
 
     const compile = b.addTest(.{
-        .root_source_file = b.path(testdef.entry),
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .root_source_file = b.path(testdef.entry),
+            .imports = testdef.imports,
+            .target = target,
+            .optimize = optimize,
+        }),
     });
 
-    for (testdef.embeds) |embed|
-        compile.root_module.addAnonymousImport(embed[0], embed[1]);
-
-    const run = b.addRunArtifact(compile);
-
-    step.dependOn(&run.step);
+    if (run_test) {
+        b.getInstallStep().dependOn(&compile.step);
+    } else {
+        const run = b.addRunArtifact(compile);
+        step.dependOn(&run.step);
+    }
 }
 
 fn build_tests(b: *Build, target: ResolvedTarget, optimize: OptimizeMode) void {
-    const embeds = &[_]TestEmbed{
-        .{ "build.zig.zon", .{ .root_source_file = b.path("build.zig.zon") } },
-        .{ "testfile_app_all", .{ .root_source_file = b.path("testing/app.all.asmtest") } },
-        .{ "testfile_app_base", .{ .root_source_file = b.path("testing/app.base.asmtest") } },
-        .{ "testfile_app_default", .{ .root_source_file = b.path("testing/app.default.asmtest") } },
-        .{ "testfile_fmt_all", .{ .root_source_file = b.path("testing/fmt.all.asmtest") } },
-        .{ "testfile_fmt_base", .{ .root_source_file = b.path("testing/fmt.base.asmtest") } },
-        .{ "testfile_fmt_default", .{ .root_source_file = b.path("testing/fmt.default.asmtest") } },
+    const no_run = b.option(bool, "no-run", "skip running tests") orelse false;
+
+    const imports_embeds: []const ModuleImport = blk: {
+        const files: []const struct { []const u8, []const u8 } = &.{
+            .{ "build.zig.zon", "build.zig.zon" },
+            .{ "testfile_app_all", "testing/app.all.asmtest" },
+            .{ "testfile_app_base", "testing/app.base.asmtest" },
+            .{ "testfile_app_default", "testing/app.default.asmtest" },
+            .{ "testfile_fmt_all", "testing/fmt.all.asmtest" },
+            .{ "testfile_fmt_base", "testing/fmt.base.asmtest" },
+            .{ "testfile_fmt_default", "testing/fmt.default.asmtest" },
+        };
+        var modules: [files.len]ModuleImport = undefined;
+        for (files, 0..) |file, i| modules[i] = .{
+            .name = file.@"0",
+            .module = b.createModule(.{ .root_source_file = b.path(file.@"1") }),
+        };
+        break :blk &modules;
     };
 
-    build_single_test(b, target, optimize, .{
+    build_single_test(b, target, optimize, !no_run, .{
         .name = "test",
         .desc = "Run all tests, including tests not covered by test-exe or test-module",
         .entry = "src/test.zig",
-        .embeds = embeds,
+        .imports = imports_embeds,
     });
 
-    build_single_test(b, target, optimize, .{
+    build_single_test(b, target, optimize, !no_run, .{
         .name = "test-exe",
         .desc = "Run executable tests",
         .entry = "src/main.zig",
-        .embeds = embeds,
+        .imports = imports_embeds,
     });
 
-    build_single_test(b, target, optimize, .{
+    build_single_test(b, target, optimize, !no_run, .{
         .name = "test-fmt",
         .desc = "Run formatter tests",
         .entry = "src/root.zig",
-        .embeds = embeds,
+        .imports = imports_embeds,
     });
 }
 

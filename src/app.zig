@@ -11,10 +11,29 @@ const Formatter = x86fmt.Fmt.Formatter;
 
 const BLAND = @import("utl_branchless.zig").BLAND;
 
+// FIXME: it appears that if a write is attempted and the unused capacity cannot
+//  fit the write, it errors and just silently drops the write, because the write
+//  errors are pathologically ignored in this codebase. this wasn't an issue in
+//  0.14.1, but apparently new std Io is more strict when it comes to flushing.
+//  stopgap "check if the write can fit and pre-emptively flush the main writer"
+//  maneuver inserted into Utf8LineMeasuringWriter.write.
+// TODO: related to above fixme
+//  - clean up stopgap in U8LMW; also this is more evidence that U8LMW should not
+//    be presenting as a humble writer (maybe its "role" should be explicitly
+//    something like "the line formatter"??)
+//  - stop just ignoring all the write errors
+//  - add tests explicitly checking for the problem described in the fixme; most
+//    likely a single-line test exceeding the line length limit, with the last
+//    item partially overlapping the remaining buffer, will do?
+
 const BUF_SIZE_LINE_IO = 4096; // NOTE: meant to be 4095; std bug in Reader.readUntilDelimiterOrEof
 const BUF_SIZE_LINE_TOK = 1024;
 const BUF_SIZE_LINE_LEX = 512;
 const BUF_SIZE_TOK = 256;
+
+var STDI_BUF = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
+var STDO_BUF = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
+var STDE_BUF = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
 
 /// @args   *ArgIterator or *ArgIteratorGeneral from std.process
 ///         assumes argument containing executable name is already skipped
@@ -23,13 +42,17 @@ const BUF_SIZE_TOK = 256;
 /// @stde   stderr File
 pub fn Main(alloc: Allocator, args: anytype, stdi: File, stdo: File, stde: File) !void {
     var settings = AppSettings.ParseCLI(alloc, args) catch |err| {
-        try stde.writer().print("Settings Error ({s})", .{@errorName(err)});
+        var w = stde.writerStreaming(&STDE_BUF);
+        defer w.interface.flush() catch {};
+        try w.interface.print("Settings Error ({s})", .{@errorName(err)});
         return;
     };
     defer settings.Deinit(alloc);
 
     if (settings.bShowHelp) {
-        _ = try stdo.writer().write(AppSettings.HelpText);
+        var w = stdo.writerStreaming(&STDO_BUF);
+        defer w.interface.flush() catch {};
+        _ = try w.interface.write(AppSettings.HelpText);
         return;
     }
 
@@ -38,29 +61,31 @@ pub fn Main(alloc: Allocator, args: anytype, stdi: File, stdo: File, stde: File)
             .File => try std.fs.cwd().openFile(settings.IFile, .{}),
             .Console => c: {
                 if (BLAND(!settings.bAllowTty, stdi.isTty())) {
-                    _ = try stdo.writer().write(AppSettings.HelpTextShort);
+                    var w = stdo.writerStreaming(&STDO_BUF);
+                    defer w.interface.flush() catch {};
+                    _ = try w.interface.write(AppSettings.HelpTextShort);
                     return;
                 }
                 break :c stdi;
             },
         };
         defer if (settings.IKind == .File) fi.close();
-        var br = std.io.bufferedReader(fi.reader());
+        var br = fi.readerStreaming(&STDI_BUF);
 
         const fo = switch (settings.OKind) {
             .File => try std.fs.cwd().createFile(settings.OFile, .{}),
             .Console => stdo,
         };
         defer if (settings.OKind == .File) fo.close();
-        var bw = std.io.bufferedWriter(fo.writer());
-        defer bw.flush() catch {};
+        var bw = fo.writerStreaming(&STDO_BUF);
+        defer bw.interface.flush() catch {};
 
-        var bew = std.io.bufferedWriter(stde.writer());
-        defer bew.flush() catch {};
+        var bew = stde.writerStreaming(&STDE_BUF);
+        defer bew.interface.flush() catch {};
 
         const fmt = Formatter(BUF_SIZE_LINE_IO, BUF_SIZE_LINE_TOK, BUF_SIZE_LINE_LEX, BUF_SIZE_TOK);
-        fmt.Format(br.reader(), bw.writer(), bew.writer(), settings.Format) catch |err| {
-            try stde.writer().print("Formatting Error ({s})", .{@errorName(err)});
+        fmt.Format(&br.interface, &bw.interface, &bew.interface, settings.Format) catch |err| {
+            try bew.interface.print("Formatting Error ({s})", .{@errorName(err)});
         };
     }
 
@@ -85,7 +110,7 @@ test "App Main" {
         ex_data: []const u8,
         in: TestCaseIO = .Console,
         out: TestCaseIO = .Console,
-        use_input_for_expected: bool = false,
+        input_is_expected_output: bool = false,
         //tty: bool = false,
     };
 
@@ -134,7 +159,7 @@ test "App Main" {
             .cmd = try std.fmt.allocPrint(arena_alloc, "{s}/{s}", .{ tmpdir_path, input_file }),
             .in_data = testfile_app_base,
             .ex_data = testfile_app_default,
-            .use_input_for_expected = true,
+            .input_is_expected_output = true,
             .in = .File,
             .out = .File,
         },
@@ -147,7 +172,7 @@ test "App Main" {
             ),
             .in_data = testfile_app_base,
             .ex_data = testfile_app_default,
-            .use_input_for_expected = true,
+            .input_is_expected_output = true,
             .in = .File,
             .out = .File,
         },
@@ -201,7 +226,7 @@ test "App Main" {
             ),
             .in_data = testfile_app_base,
             .ex_data = testfile_app_all,
-            .use_input_for_expected = true,
+            .input_is_expected_output = true,
             .in = .File,
             .out = .File,
         },
@@ -214,7 +239,7 @@ test "App Main" {
             ),
             .in_data = testfile_app_base,
             .ex_data = testfile_app_all,
-            .use_input_for_expected = true,
+            .input_is_expected_output = true,
             .in = .File,
             .out = .File,
         },
@@ -256,14 +281,14 @@ test "App Main" {
                     // FIXME: thought you can do tty tests with `.allow_ctty = true`
                     //  here, but it seems not; need to figure out how
                     .Console => try tmpdir.dir.openFile(input_file, .{}),
-                    .File => std.io.getStdIn(), // dummy File
+                    .File => std.fs.File.stdin(), // dummy File
                 };
             };
             defer if (t.in == .Console) input.close();
 
             const output = switch (t.out) {
                 .Console => try tmpdir.dir.createFile(output_file_buf, .{}),
-                .File => std.io.getStdOut(), // dummy File
+                .File => std.fs.File.stdout(), // dummy File
             };
             defer if (t.out == .Console) output.close();
 
@@ -276,7 +301,7 @@ test "App Main" {
         }
 
         const output_buf = blk: {
-            const ex_filename = if (t.use_input_for_expected) input_file else switch (t.out) {
+            const ex_filename = if (t.input_is_expected_output) input_file else switch (t.out) {
                 .Console => output_file_buf,
                 .File => output_file_disk,
             };
@@ -285,6 +310,8 @@ test "App Main" {
             break :blk try f.readToEndAlloc(loop_arena_alloc, std.math.maxInt(usize));
         };
 
+        try std.testing.expectEqualSlices(u8, t.ex_data, output_buf);
         try std.testing.expectEqualStrings(t.ex_data, output_buf);
+        try std.testing.expectEqual(t.ex_data.len, output_buf.len);
     }
 }

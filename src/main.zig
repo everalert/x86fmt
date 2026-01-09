@@ -15,9 +15,9 @@ pub fn main() !void {
     defer args.deinit();
     _ = args.next();
 
-    const stdi = std.io.getStdIn();
-    const stdo = std.io.getStdOut();
-    const stde = std.io.getStdErr();
+    const stdi = std.fs.File.stdin();
+    const stdo = std.fs.File.stdout();
+    const stde = std.fs.File.stderr();
 
     return App.Main(alloc, &args, stdi, stdo, stde);
 }
@@ -25,4 +25,6 @@ pub fn main() !void {
 test "Application" {
     _ = @import("app.zig");
     _ = @import("app_settings.zig");
+    _ = @import("app_version.zig");
+    _ = @import("app_manifest.zig");
 }
