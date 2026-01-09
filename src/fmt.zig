@@ -43,7 +43,18 @@ pub fn Formatter(
             err_writer: *std.Io.Writer,
             settings: Settings,
         ) !void {
-            var line_s = reader.takeDelimiter('\n') catch null orelse return;
+            // FIXME: kinda icky, simplify plis???? (same thing a bit lower too)
+            //  unless this kind of thing ends up being unnecessary to begin with
+            //  in new parser
+            var line_buf_writer: std.Io.Writer = .fixed(&RawBufLine);
+            _ = reader.streamDelimiter(&line_buf_writer, '\n') catch |e| {
+                switch (e) {
+                    error.EndOfStream => if (line_buf_writer.buffered().len == 0) return,
+                    error.ReadFailed, error.WriteFailed => return,
+                }
+            };
+            _ = reader.takeByte() catch {};
+            var line_s = line_buf_writer.buffered();
             var line_i: usize = 0;
 
             // TODO: dump file verbatim and post message to err_writer instead?
@@ -63,8 +74,16 @@ pub fn Formatter(
             var line_ctx_prev = line_ctx;
             var blank_lines: usize = 0;
             while (true) : ({
-                //reader_ltd.interface.rebase(BUF_SIZE_LINE_IO) catch null orelse break;
-                line_s = reader.takeDelimiter('\n') catch null orelse break;
+                line_buf_writer = .fixed(&RawBufLine);
+                _ = reader.streamDelimiter(&line_buf_writer, '\n') catch |e| {
+                    switch (e) {
+                        error.EndOfStream => if (line_buf_writer.buffered().len == 0) return,
+                        error.ReadFailed, error.WriteFailed => return,
+                    }
+                };
+                _ = reader.takeByte() catch {};
+                line_s = line_buf_writer.buffered();
+
                 line_i += 1;
                 line_ctx_prev = line_ctx;
                 line_ctx.ActualColFirst = 0;
@@ -357,6 +376,7 @@ test "Format" {
             \\    .hBitmap                        resd 1
             \\    .Info                           resb BITMAPINFOHEADER_size
             \\    endstruc
+            \\
             // TODO: should be something like this instead once nested stuff is done
             //\\struc ScreenBuffer
             //\\    .Width                          resd 1
@@ -625,11 +645,11 @@ test "Format" {
     };
 
     for (test_cases, 0..) |t, i| {
-        errdefer std.debug.print("FAILED {d:0>2}\n\n", .{i});
+        errdefer std.debug.print("\nFAILED {d:0>2}\n\n", .{i});
 
-        var output: std.Io.Writer.Allocating = try .initCapacity(std.testing.allocator, t.ex.len);
+        var input: std.Io.Reader = .fixed(t.in);
+        var output: std.Io.Writer.Allocating = try .initCapacity(std.testing.allocator, 0);
         defer output.deinit();
-        var input = std.Io.Reader.fixed(t.in);
 
         const result = fmt.Format(&input, &output.writer, &stde_w, .default);
 

@@ -17,7 +17,9 @@ const BLAND = @import("utl_branchless.zig").BLAND;
 //  - it seems the other buffer sizes are not affecting this, only BUF_SIZE_LINE_IO.
 //  - tests pass when set to 16096.
 //  - Formatter itself doesn't use BUF_SIZE_LINE_IO at all, so it must be an error
-//    in this file?
+//    in this file? or, a problem with writer usage in fmt?
+//  - problem happens when formatting the test file directly with the built app,
+//    not only when running tests, i.e. it isn't the test code
 const BUF_SIZE_LINE_IO = 4096; // NOTE: meant to be 4095; std bug in Reader.readUntilDelimiterOrEof
 const BUF_SIZE_LINE_TOK = 1024;
 const BUF_SIZE_LINE_LEX = 512;
