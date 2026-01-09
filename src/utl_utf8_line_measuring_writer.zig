@@ -21,7 +21,7 @@ LineLen: usize,
 LineLws: usize,
 
 pub const Error = error{};
-//pub const Writer = io.Writer(*LMW, Error, write);
+pub const WriterType = std.Io.GenericWriter(*LineMeasuringWriter, anyerror, write);
 
 pub fn Init(child_stream: *std.Io.Writer) LineMeasuringWriter {
     return .{ .child_stream = child_stream, .LineLen = 0, .LineLws = 0 };
@@ -35,7 +35,7 @@ pub fn PadSpaces(self: *LineMeasuringWriter, until: usize, min: usize) !void {
     try self.Writer().writeByteNTimes(' ', n);
 }
 
-pub fn Writer(self: *LineMeasuringWriter) std.Io.GenericWriter(*LineMeasuringWriter, anyerror, write) {
+pub fn Writer(self: *LineMeasuringWriter) WriterType {
     return .{ .context = self };
 }
 
@@ -47,11 +47,15 @@ pub fn write(self: *LineMeasuringWriter, bytes: []const u8) anyerror!usize {
     if (self.LineLen == self.LineLws)
         self.LineLws += std.mem.indexOfNone(u8, first, " \t") orelse first.len;
     self.LineLen += std.unicode.utf8CountCodepoints(first) catch first.len;
+    if (first.len > self.child_stream.unusedCapacityLen())
+        try self.child_stream.flush();
     amt += try self.child_stream.write(first);
 
     while (line_it.next()) |line| {
         self.LineLws = std.mem.indexOfNone(u8, line, " \t") orelse line.len;
         self.LineLen = std.unicode.utf8CountCodepoints(line) catch line.len;
+        if (line.len + 1 > self.child_stream.unusedCapacityLen())
+            try self.child_stream.flush();
         amt += try self.child_stream.write("\n");
         amt += try self.child_stream.write(line);
     }

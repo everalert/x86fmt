@@ -11,15 +11,21 @@ const Formatter = x86fmt.Fmt.Formatter;
 
 const BLAND = @import("utl_branchless.zig").BLAND;
 
-// FIXME: BUF_SIZE_LINE_IO affects whether tests pass.
-//  - when set to 4096, long tests mismatch at around byte 4080; when set to 8096,
-//    mismatch is at over 8000 bytes in.
-//  - it seems the other buffer sizes are not affecting this, only BUF_SIZE_LINE_IO.
-//  - tests pass when set to 16096.
-//  - Formatter itself doesn't use BUF_SIZE_LINE_IO at all, so it must be an error
-//    in this file? or, a problem with writer usage in fmt?
-//  - problem happens when formatting the test file directly with the built app,
-//    not only when running tests, i.e. it isn't the test code
+// FIXME: it appears that if a write is attempted and the unused capacity cannot
+//  fit the write, it errors and just silently drops the write, because the write
+//  errors are pathologically ignored in this codebase. this wasn't an issue in
+//  0.14.1, but apparently new std Io is more strict when it comes to flushing.
+//  stopgap "check if the write can fit and pre-emptively flush the main writer"
+//  maneuver inserted into Utf8LineMeasuringWriter.write.
+// TODO: related to above fixme
+//  - clean up stopgap in U8LMW; also this is more evidence that U8LMW should not
+//    be presenting as a humble writer (maybe its "role" should be explicitly
+//    something like "the line formatter"??)
+//  - stop just ignoring all the write errors
+//  - add tests explicitly checking for the problem described in the fixme; most
+//    likely a single-line test exceeding the line length limit, with the last
+//    item partially overlapping the remaining buffer, will do?
+
 const BUF_SIZE_LINE_IO = 4096; // NOTE: meant to be 4095; std bug in Reader.readUntilDelimiterOrEof
 const BUF_SIZE_LINE_TOK = 1024;
 const BUF_SIZE_LINE_LEX = 512;
@@ -36,7 +42,7 @@ var STDE_BUF = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
 /// @stde   stderr File
 pub fn Main(alloc: Allocator, args: anytype, stdi: File, stdo: File, stde: File) !void {
     var settings = AppSettings.ParseCLI(alloc, args) catch |err| {
-        var w = stde.writer(&STDE_BUF);
+        var w = stde.writerStreaming(&STDE_BUF);
         defer w.interface.flush() catch {};
         try w.interface.print("Settings Error ({s})", .{@errorName(err)});
         return;
@@ -44,7 +50,7 @@ pub fn Main(alloc: Allocator, args: anytype, stdi: File, stdo: File, stde: File)
     defer settings.Deinit(alloc);
 
     if (settings.bShowHelp) {
-        var w = stdo.writer(&STDO_BUF);
+        var w = stdo.writerStreaming(&STDO_BUF);
         defer w.interface.flush() catch {};
         _ = try w.interface.write(AppSettings.HelpText);
         return;
@@ -55,7 +61,7 @@ pub fn Main(alloc: Allocator, args: anytype, stdi: File, stdo: File, stde: File)
             .File => try std.fs.cwd().openFile(settings.IFile, .{}),
             .Console => c: {
                 if (BLAND(!settings.bAllowTty, stdi.isTty())) {
-                    var w = stdo.writer(&STDO_BUF);
+                    var w = stdo.writerStreaming(&STDO_BUF);
                     defer w.interface.flush() catch {};
                     _ = try w.interface.write(AppSettings.HelpTextShort);
                     return;
@@ -64,17 +70,17 @@ pub fn Main(alloc: Allocator, args: anytype, stdi: File, stdo: File, stde: File)
             },
         };
         defer if (settings.IKind == .File) fi.close();
-        var br = fi.reader(&STDI_BUF);
+        var br = fi.readerStreaming(&STDI_BUF);
 
         const fo = switch (settings.OKind) {
             .File => try std.fs.cwd().createFile(settings.OFile, .{}),
             .Console => stdo,
         };
         defer if (settings.OKind == .File) fo.close();
-        var bw = fo.writer(&STDO_BUF);
+        var bw = fo.writerStreaming(&STDO_BUF);
         defer bw.interface.flush() catch {};
 
-        var bew = stde.writer(&STDE_BUF);
+        var bew = stde.writerStreaming(&STDE_BUF);
         defer bew.interface.flush() catch {};
 
         const fmt = Formatter(BUF_SIZE_LINE_IO, BUF_SIZE_LINE_TOK, BUF_SIZE_LINE_LEX, BUF_SIZE_TOK);
@@ -304,7 +310,7 @@ test "App Main" {
             break :blk try f.readToEndAlloc(loop_arena_alloc, std.math.maxInt(usize));
         };
 
-        //try std.testing.expectEqualSlices(u8, t.ex_data, output_buf);
+        try std.testing.expectEqualSlices(u8, t.ex_data, output_buf);
         try std.testing.expectEqualStrings(t.ex_data, output_buf);
         try std.testing.expectEqual(t.ex_data.len, output_buf.len);
     }

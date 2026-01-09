@@ -200,7 +200,7 @@ pub fn Formatter(
         /// @tok    tokenized source line, in the format produced by Token-related code
         /// @out    buffer must be empty for correct formatting
         fn FormatSourceLine(
-            writer: anytype, // Utf8LineMeasuringWriter.Writer
+            writer: *Utf8LineMeasuringWriter.WriterType,
             lex: []const Lexeme,
             ctx: *const Line.Context,
         ) !void {
@@ -236,7 +236,7 @@ pub fn Formatter(
         }
 
         fn FormatGenericDirectiveLine(
-            writer: anytype, // Utf8LineMeasuringWriter.Writer
+            writer: *Utf8LineMeasuringWriter.WriterType,
             lex: []const Lexeme,
             ctx: *const Line.Context,
         ) !void {
@@ -257,6 +257,19 @@ pub fn Formatter(
             error_message: []const u8,
         ) !void {
             try writer.print("L{d:0>4}: {s} ({s})\n", .{ line + 1, label, error_message });
+        }
+
+        /// convenience function for writing a series of raw buffers and ensuring
+        /// the output buffer has enough space before writing
+        fn WriteRawMessage(writer: *std.Io.Writer, data: []const []const u8) !void {
+            var capacity = writer.unusedCapacityLen();
+            for (data) |d| {
+                if (d.len > capacity) {
+                    try writer.flush();
+                    capacity = writer.unusedCapacityLen();
+                }
+                capacity -= try writer.write(d);
+            }
         }
     };
 }
