@@ -11,6 +11,13 @@ const Formatter = x86fmt.Fmt.Formatter;
 
 const BLAND = @import("utl_branchless.zig").BLAND;
 
+// FIXME: BUF_SIZE_LINE_IO affects whether tests pass.
+//  - when set to 4096, long tests mismatch at around byte 4080; when set to 8096,
+//    mismatch is at over 8000 bytes in.
+//  - it seems the other buffer sizes are not affecting this, only BUF_SIZE_LINE_IO.
+//  - tests pass when set to 16096.
+//  - Formatter itself doesn't use BUF_SIZE_LINE_IO at all, so it must be an error
+//    in this file?
 const BUF_SIZE_LINE_IO = 4096; // NOTE: meant to be 4095; std bug in Reader.readUntilDelimiterOrEof
 const BUF_SIZE_LINE_TOK = 1024;
 const BUF_SIZE_LINE_LEX = 512;
@@ -95,7 +102,7 @@ test "App Main" {
         ex_data: []const u8,
         in: TestCaseIO = .Console,
         out: TestCaseIO = .Console,
-        use_input_for_expected: bool = false,
+        input_is_expected_output: bool = false,
         //tty: bool = false,
     };
 
@@ -144,7 +151,7 @@ test "App Main" {
             .cmd = try std.fmt.allocPrint(arena_alloc, "{s}/{s}", .{ tmpdir_path, input_file }),
             .in_data = testfile_app_base,
             .ex_data = testfile_app_default,
-            .use_input_for_expected = true,
+            .input_is_expected_output = true,
             .in = .File,
             .out = .File,
         },
@@ -157,7 +164,7 @@ test "App Main" {
             ),
             .in_data = testfile_app_base,
             .ex_data = testfile_app_default,
-            .use_input_for_expected = true,
+            .input_is_expected_output = true,
             .in = .File,
             .out = .File,
         },
@@ -211,7 +218,7 @@ test "App Main" {
             ),
             .in_data = testfile_app_base,
             .ex_data = testfile_app_all,
-            .use_input_for_expected = true,
+            .input_is_expected_output = true,
             .in = .File,
             .out = .File,
         },
@@ -224,7 +231,7 @@ test "App Main" {
             ),
             .in_data = testfile_app_base,
             .ex_data = testfile_app_all,
-            .use_input_for_expected = true,
+            .input_is_expected_output = true,
             .in = .File,
             .out = .File,
         },
@@ -286,7 +293,7 @@ test "App Main" {
         }
 
         const output_buf = blk: {
-            const ex_filename = if (t.use_input_for_expected) input_file else switch (t.out) {
+            const ex_filename = if (t.input_is_expected_output) input_file else switch (t.out) {
                 .Console => output_file_buf,
                 .File => output_file_disk,
             };
@@ -295,6 +302,8 @@ test "App Main" {
             break :blk try f.readToEndAlloc(loop_arena_alloc, std.math.maxInt(usize));
         };
 
+        //try std.testing.expectEqualSlices(u8, t.ex_data, output_buf);
         try std.testing.expectEqualStrings(t.ex_data, output_buf);
+        try std.testing.expectEqual(t.ex_data.len, output_buf.len);
     }
 }

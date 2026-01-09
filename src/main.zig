@@ -25,4 +25,6 @@ pub fn main() !void {
 test "Application" {
     _ = @import("app.zig");
     _ = @import("app_settings.zig");
+    _ = @import("app_version.zig");
+    _ = @import("app_manifest.zig");
 }
