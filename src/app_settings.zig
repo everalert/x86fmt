@@ -124,19 +124,19 @@ pub const default: AppSettings = .{
 };
 
 const Waiters = struct {
-    fo: bool = false,
-    ts: bool = false,
-    mbl: bool = false,
-    tcc: bool = false,
-    tia: bool = false,
-    toa: bool = false,
-    dcc: bool = false,
-    dia: bool = false,
-    doa: bool = false,
-    sin: bool = false,
-    sid: bool = false,
-    sit: bool = false,
-    sio: bool = false,
+    fo: bool,
+    ts: bool,
+    mbl: bool,
+    tcc: bool,
+    tia: bool,
+    toa: bool,
+    dcc: bool,
+    dia: bool,
+    doa: bool,
+    sin: bool,
+    sid: bool,
+    sit: bool,
+    sio: bool,
 
     pub const default: Waiters = .{
         .fo = false,
