@@ -11,15 +11,14 @@ pub fn main() !void {
     var fba = std.heap.FixedBufferAllocator.init(&mem);
     const alloc = fba.allocator();
 
-    var args = try std.process.argsWithAllocator(alloc);
-    defer args.deinit();
-    _ = args.next();
+    var args = try std.process.argsAlloc(alloc);
+    defer std.process.argsFree(alloc, args);
 
     const stdi = std.fs.File.stdin();
     const stdo = std.fs.File.stdout();
     const stde = std.fs.File.stderr();
 
-    return App.Main(alloc, &args, stdi, stdo, stde);
+    return App.Main(alloc, args[1..], stdi, stdo, stde);
 }
 
 test "Application" {

@@ -164,12 +164,14 @@ const Waiters = struct {
     }
 };
 
+// TODO: maybe just take the whole cli, including exe name, to simplify things
+//  so that you don't have to know to skip
 /// Parse command line arguments and generate a CLI settings object. Caller is
 /// responsible for freeing memory with `Deinit`, and verifying the existence of
 /// any files indicated in the return value.
 /// @args   *ArgIterator or *ArgIteratorGeneral from std.process
 ///         assumes argument containing executable name is already skipped
-pub fn ParseCLI(alloc: Allocator, args: anytype) !AppSettings {
+pub fn ParseCLI(alloc: Allocator, args: []const [:0]const u8) !AppSettings {
     var i_kind: ?IOKind = null;
     var o_kind: ?IOKind = null;
     var i_file: []const u8 = &.{};
@@ -184,7 +186,9 @@ pub fn ParseCLI(alloc: Allocator, args: anytype) !AppSettings {
     var waiters: Waiters = .default;
 
     //_ = args.next(); // executable location in argv[0] should be skipped before running this
-    while (args.next()) |arg| {
+    //while (args.next()) |arg| {
+    //for (args[1..]) |arg| {
+    for (args) |arg| {
         const fo = EnumCheckOnce(arg, &.{"-fo"}, IOKind, .File, &o_kind);
         if (StageTwoCheck(alloc, arg, fo, []const u8, &o_file, &.{}, &waiters.fo))
             continue;
@@ -272,9 +276,9 @@ pub fn Deinit(self: *AppSettings, alloc: Allocator) void {
     alloc.free(self.OFile);
 }
 
-test "App Settings" {
+test "Settings" {
     const AppSettingsTestCase = struct {
-        in: []const u8,
+        in: []const [:0]const u8,
         ex: AppSettings = .default,
         err: ?Error = null,
     };
@@ -292,11 +296,11 @@ test "App Settings" {
     const test_cases = [_]AppSettingsTestCase{
         .{
             // default settings (stdin -> stdout)
-            .in = "",
+            .in = &.{},
         },
         .{
             // file -> replace file
-            .in = "filename",
+            .in = &.{"filename"},
             .ex = blk: {
                 var ex: AppSettings = .default;
                 ex.IFile = "filename";
@@ -309,7 +313,7 @@ test "App Settings" {
         },
         .{
             // file -> replace file (two commands)
-            .in = "filename -fo filename",
+            .in = &.{ "filename", "-fo", "filename" },
             .ex = blk: {
                 var ex: AppSettings = .default;
                 ex.IFile = "filename";
@@ -322,7 +326,7 @@ test "App Settings" {
         },
         .{
             // file -> new file
-            .in = "filename1 -fo filename2",
+            .in = &.{ "filename1", "-fo", "filename2" },
             .ex = blk: {
                 var ex: AppSettings = .default;
                 ex.IFile = "filename1";
@@ -334,7 +338,7 @@ test "App Settings" {
         },
         .{
             // stdin -> file
-            .in = "-fo filename",
+            .in = &.{ "-fo", "filename" },
             .ex = blk: {
                 var ex: AppSettings = .default;
                 ex.OFile = "filename";
@@ -344,7 +348,7 @@ test "App Settings" {
         },
         .{
             // file -> stdout
-            .in = "filename -co",
+            .in = &.{ "filename", "-co" },
             .ex = blk: {
                 var ex: AppSettings = .default;
                 ex.IFile = "filename";
@@ -354,7 +358,7 @@ test "App Settings" {
         },
         .{
             // help shorthand
-            .in = "-h",
+            .in = &.{"-h"},
             .ex = blk: {
                 var ex: AppSettings = .default;
                 ex.bShowHelp = true;
@@ -363,7 +367,7 @@ test "App Settings" {
         },
         .{
             // help long form
-            .in = "--help",
+            .in = &.{"--help"},
             .ex = blk: {
                 var ex: AppSettings = .default;
                 ex.bShowHelp = true;
@@ -372,7 +376,7 @@ test "App Settings" {
         },
         .{
             // tty shorthand
-            .in = "-tty",
+            .in = &.{"-tty"},
             .ex = blk: {
                 var ex: AppSettings = .default;
                 ex.bAllowTty = true;
@@ -381,7 +385,7 @@ test "App Settings" {
         },
         .{
             // tty long form
-            .in = "--allow-tty",
+            .in = &.{"--allow-tty"},
             .ex = blk: {
                 var ex: AppSettings = .default;
                 ex.bAllowTty = true;
@@ -390,10 +394,12 @@ test "App Settings" {
         },
         .{
             // cosmetic shorthand
-            .in = " -ts 101 -mbl 102" ++
-                " -tcc 103 -tia 104 -toa 105" ++
-                " -dcc 106 -dia 107 -doa 108" ++
-                " -sin 109 -sid 110 -sit 111 -sio 112",
+            .in = &.{
+                "-ts",  "101", "-mbl", "102", "-tcc", "103",
+                "-tia", "104", "-toa", "105", "-dcc", "106",
+                "-dia", "107", "-doa", "108", "-sin", "109",
+                "-sid", "110", "-sit", "111", "-sio", "112",
+            },
             .ex = blk: {
                 var ex: AppSettings = .default;
                 ex.Format.TabSize = 101;
@@ -413,11 +419,14 @@ test "App Settings" {
         },
         .{
             // cosmetic long form
-            .in = " --tab-size 101 --max-blank-lines 102" ++
-                " --text-comment-column 103 --text-instruction-advance 104 --text-operands-advance 105" ++
-                " --data-comment-column 106 --data-instruction-advance 107 --data-operands-advance 108" ++
-                " --section-indent-none 109 --section-indent-data 110" ++
-                " --section-indent-text 111 --section-indent-other 112",
+            .in = &.{
+                "--tab-size",                 "101", "--max-blank-lines",          "102",
+                "--text-comment-column",      "103", "--text-instruction-advance", "104",
+                "--text-operands-advance",    "105", "--data-comment-column",      "106",
+                "--data-instruction-advance", "107", "--data-operands-advance",    "108",
+                "--section-indent-none",      "109", "--section-indent-data",      "110",
+                "--section-indent-text",      "111", "--section-indent-other",     "112",
+            },
             .ex = blk: {
                 var ex: AppSettings = .default;
                 ex.Format.TabSize = 101;
@@ -437,14 +446,16 @@ test "App Settings" {
         },
         .{
             // cosmetic apply once
-            .in = " -ts 101 -mbl 102" ++
-                " -tcc 103 -tia 104 -toa 105" ++
-                " -dcc 106 -dia 107 -doa 108" ++
-                " -sin 109 -sid 110 -sit 111 -sio 112" ++
-                " -ts 113 -mbl 114" ++
-                " -tcc 115 -tia 116 -toa 117" ++
-                " -dcc 118 -dia 119 -doa 120" ++
-                " -sin 121 -sid 122 -sit 123 -sio 124",
+            .in = &.{
+                "-ts",  "101", "-mbl", "102", "-tcc", "103",
+                "-tia", "104", "-toa", "105", "-dcc", "106",
+                "-dia", "107", "-doa", "108", "-sin", "109",
+                "-sid", "110", "-sit", "111", "-sio", "112",
+                "-ts",  "113", "-mbl", "114", "-tcc", "115",
+                "-tia", "116", "-toa", "117", "-dcc", "118",
+                "-dia", "119", "-doa", "120", "-sin", "121",
+                "-sid", "122", "-sit", "123", "-sio", "124",
+            },
             .ex = blk: {
                 var ex: AppSettings = .default;
                 ex.Format.TabSize = 101;
@@ -464,7 +475,7 @@ test "App Settings" {
         },
         .{
             // file output apply once
-            .in = "-fo filename1 -fo filename2",
+            .in = &.{ "-fo", "filename1", "-fo", "filename2" },
             .ex = blk: {
                 var ex: AppSettings = .default;
                 ex.OFile = "filename1";
@@ -475,7 +486,7 @@ test "App Settings" {
         .{
             // TODO: maybe this case should simply ignore the missing value since
             //  the value is already set?
-            .in = "filename1 filename2",
+            .in = &.{ "filename1", "filename2" },
             .ex = blk: {
                 var ex: AppSettings = .default;
                 ex.IFile = "filename1";
@@ -487,72 +498,106 @@ test "App Settings" {
             },
         },
         // error: two-part options left hanging
-        .{ .in = "-fo", .err = Error.MissingArgumentValue },
-        .{ .in = "-ts", .err = Error.MissingArgumentValue },
-        .{ .in = "-mbl", .err = Error.MissingArgumentValue },
-        .{ .in = "-tcc", .err = Error.MissingArgumentValue },
-        .{ .in = "-tia", .err = Error.MissingArgumentValue },
-        .{ .in = "-toa", .err = Error.MissingArgumentValue },
-        .{ .in = "-dcc", .err = Error.MissingArgumentValue },
-        .{ .in = "-dia", .err = Error.MissingArgumentValue },
-        .{ .in = "-doa", .err = Error.MissingArgumentValue },
-        .{ .in = "-sin", .err = Error.MissingArgumentValue },
-        .{ .in = "-sid", .err = Error.MissingArgumentValue },
-        .{ .in = "-sit", .err = Error.MissingArgumentValue },
-        .{ .in = "-sio", .err = Error.MissingArgumentValue },
-        .{ .in = "--tab-size", .err = Error.MissingArgumentValue },
-        .{ .in = "--max-blank-lines", .err = Error.MissingArgumentValue },
-        .{ .in = "--text-comment-column", .err = Error.MissingArgumentValue },
-        .{ .in = "--text-instruction-advance", .err = Error.MissingArgumentValue },
-        .{ .in = "--text-operands-advance", .err = Error.MissingArgumentValue },
-        .{ .in = "--data-comment-column", .err = Error.MissingArgumentValue },
-        .{ .in = "--data-instruction-advance", .err = Error.MissingArgumentValue },
-        .{ .in = "--data-operands-advance", .err = Error.MissingArgumentValue },
-        .{ .in = "--section-indent-none", .err = Error.MissingArgumentValue },
-        .{ .in = "--section-indent-data", .err = Error.MissingArgumentValue },
-        .{ .in = "--section-indent-text", .err = Error.MissingArgumentValue },
-        .{ .in = "--section-indent-other", .err = Error.MissingArgumentValue },
+        .{ .in = &.{"-fo"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"-ts"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"-mbl"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"-tcc"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"-tia"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"-toa"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"-dcc"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"-dia"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"-doa"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"-sin"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"-sid"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"-sit"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"-sio"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"--tab-size"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"--max-blank-lines"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"--text-comment-column"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"--text-instruction-advance"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"--text-operands-advance"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"--data-comment-column"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"--data-instruction-advance"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"--data-operands-advance"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"--section-indent-none"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"--section-indent-data"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"--section-indent-text"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"--section-indent-other"}, .err = Error.MissingArgumentValue },
         // TODO: maybe these cases should simply ignore the missing value since
         //  the value is already set?
         // error: double-specified two-part option left hanging on second spec
-        .{ .in = "-fo filename1 -fo", .err = Error.MissingArgumentValue },
-        .{ .in = "-ts 9999 -ts", .err = Error.MissingArgumentValue },
-        .{ .in = "-mbl 9999 -mbl", .err = Error.MissingArgumentValue },
-        .{ .in = "-tcc 9999 -tcc", .err = Error.MissingArgumentValue },
-        .{ .in = "-tia 9999 -tia", .err = Error.MissingArgumentValue },
-        .{ .in = "-toa 9999 -toa", .err = Error.MissingArgumentValue },
-        .{ .in = "-dcc 9999 -dcc", .err = Error.MissingArgumentValue },
-        .{ .in = "-dia 9999 -dia", .err = Error.MissingArgumentValue },
-        .{ .in = "-doa 9999 -doa", .err = Error.MissingArgumentValue },
-        .{ .in = "-sin 9999 -sin", .err = Error.MissingArgumentValue },
-        .{ .in = "-sid 9999 -sid", .err = Error.MissingArgumentValue },
-        .{ .in = "-sit 9999 -sit", .err = Error.MissingArgumentValue },
-        .{ .in = "-sio 9999 -sio", .err = Error.MissingArgumentValue },
-        .{ .in = "--tab-size 9999 --tab-size", .err = Error.MissingArgumentValue },
-        .{ .in = "--max-blank-lines 9999 --max-blank-lines", .err = Error.MissingArgumentValue },
-        .{ .in = "--text-comment-column 9999 --text-comment-column", .err = Error.MissingArgumentValue },
-        .{ .in = "--text-instruction-advance 9999 --text-instruction-advance", .err = Error.MissingArgumentValue },
-        .{ .in = "--text-operands-advance 9999 --text-operands-advance", .err = Error.MissingArgumentValue },
-        .{ .in = "--data-comment-column 9999 --data-comment-column", .err = Error.MissingArgumentValue },
-        .{ .in = "--data-instruction-advance 9999 --data-instruction-advance", .err = Error.MissingArgumentValue },
-        .{ .in = "--data-operands-advance 9999 --data-operands-advance", .err = Error.MissingArgumentValue },
-        .{ .in = "--section-indent-none 9999 --section-indent-none", .err = Error.MissingArgumentValue },
-        .{ .in = "--section-indent-data 9999 --section-indent-data", .err = Error.MissingArgumentValue },
-        .{ .in = "--section-indent-text 9999 --section-indent-text", .err = Error.MissingArgumentValue },
-        .{ .in = "--section-indent-other 9999 --section-indent-other", .err = Error.MissingArgumentValue },
+        .{ .in = &.{ "-fo", "filename1", "-fo" }, .err = Error.MissingArgumentValue },
+        .{ .in = &.{ "-ts", "9999", "-ts" }, .err = Error.MissingArgumentValue },
+        .{ .in = &.{ "-mbl", "9999", "-mbl" }, .err = Error.MissingArgumentValue },
+        .{ .in = &.{ "-tcc", "9999", "-tcc" }, .err = Error.MissingArgumentValue },
+        .{ .in = &.{ "-tia", "9999", "-tia" }, .err = Error.MissingArgumentValue },
+        .{ .in = &.{ "-toa", "9999", "-toa" }, .err = Error.MissingArgumentValue },
+        .{ .in = &.{ "-dcc", "9999", "-dcc" }, .err = Error.MissingArgumentValue },
+        .{ .in = &.{ "-dia", "9999", "-dia" }, .err = Error.MissingArgumentValue },
+        .{ .in = &.{ "-doa", "9999", "-doa" }, .err = Error.MissingArgumentValue },
+        .{ .in = &.{ "-sin", "9999", "-sin" }, .err = Error.MissingArgumentValue },
+        .{ .in = &.{ "-sid", "9999", "-sid" }, .err = Error.MissingArgumentValue },
+        .{ .in = &.{ "-sit", "9999", "-sit" }, .err = Error.MissingArgumentValue },
+        .{ .in = &.{ "-sio", "9999", "-sio" }, .err = Error.MissingArgumentValue },
+        .{
+            .in = &.{ "--tab-size", "9999", "--tab-size" },
+            .err = Error.MissingArgumentValue,
+        },
+        .{
+            .in = &.{ "--max-blank-lines", "9999", "--max-blank-lines" },
+            .err = Error.MissingArgumentValue,
+        },
+        .{
+            .in = &.{ "--text-comment-column", "9999", "--text-comment-column" },
+            .err = Error.MissingArgumentValue,
+        },
+        .{
+            .in = &.{ "--text-instruction-advance", "9999", "--text-instruction-advance" },
+            .err = Error.MissingArgumentValue,
+        },
+        .{
+            .in = &.{ "--text-operands-advance", "9999", "--text-operands-advance" },
+            .err = Error.MissingArgumentValue,
+        },
+        .{
+            .in = &.{ "--data-comment-column", "9999", "--data-comment-column" },
+            .err = Error.MissingArgumentValue,
+        },
+        .{
+            .in = &.{ "--data-instruction-advance", "9999", "--data-instruction-advance" },
+            .err = Error.MissingArgumentValue,
+        },
+        .{
+            .in = &.{ "--data-operands-advance", "9999", "--data-operands-advance" },
+            .err = Error.MissingArgumentValue,
+        },
+        .{
+            .in = &.{ "--section-indent-none", "9999", "--section-indent-none" },
+            .err = Error.MissingArgumentValue,
+        },
+        .{
+            .in = &.{ "--section-indent-data", "9999", "--section-indent-data" },
+            .err = Error.MissingArgumentValue,
+        },
+        .{
+            .in = &.{ "--section-indent-text", "9999", "--section-indent-text" },
+            .err = Error.MissingArgumentValue,
+        },
+        .{
+            .in = &.{ "--section-indent-other", "9999", "--section-indent-other" },
+            .err = Error.MissingArgumentValue,
+        },
         // error: invalid/unknown flag
-        .{ .in = "--will-never-be-a-real-flag-surely", .err = Error.UnknownFlag },
+        .{ .in = &.{"--will-never-be-a-real-flag-surely"}, .err = Error.UnknownFlag },
     };
 
     std.testing.log_level = .debug;
     for (test_cases, 0..) |t, i| {
+        //errdefer std.debug.print("FAILED {d:0>2} :: {any}\n\n", .{ i, t.in });
         errdefer std.debug.print("FAILED {d:0>2}\n\n", .{i});
-
         const alloc = std.testing.allocator;
-        var args = try std.process.ArgIteratorGeneral(.{}).init(alloc, t.in);
-        defer args.deinit();
 
-        const result = ParseCLI(alloc, &args);
+        const result = ParseCLI(alloc, t.in);
 
         if (t.err) |t_err| {
             try std.testing.expectError(t_err, result);

@@ -40,7 +40,7 @@ var STDE_BUF = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
 /// @stdi   stdin File
 /// @stdo   stdout File
 /// @stde   stderr File
-pub fn Main(alloc: Allocator, args: anytype, stdi: File, stdo: File, stde: File) !void {
+pub fn Main(alloc: Allocator, args: []const [:0]const u8, stdi: File, stdo: File, stde: File) !void {
     var settings = AppSettings.ParseCLI(alloc, args) catch |err| {
         var w = stde.writerStreaming(&STDE_BUF);
         defer w.interface.flush() catch {};
@@ -98,14 +98,14 @@ pub fn Main(alloc: Allocator, args: anytype, stdi: File, stdo: File, stde: File)
 // TODO: assign temp dir and alloc filenames within each loop?
 // TODO: test tty, somehow
 // TODO: stderr tests
-test "App Main" {
+test "Main" {
     std.testing.log_level = .debug;
     const error_file = "stderr_dump.txt";
 
     const TestCase = struct {
         const TestCaseIO = enum { File, Console };
 
-        cmd: []const u8,
+        cmd: []const [:0]const u8,
         in_data: []const u8,
         ex_data: []const u8,
         in: TestCaseIO = .Console,
@@ -120,43 +120,56 @@ test "App Main" {
     const testfile_app_base = @embedFile("testfile_app_base");
     const testfile_app_default = @embedFile("testfile_app_default");
     const testfile_app_all = @embedFile("testfile_app_all");
-    const all_args = "-ts 2 -mbl 1 -tcc 36 -tia 8 -toa 6 -dcc 72 -dia 20" ++
-        " -doa 36 -sin 2 -sid 4 -sit 6 -sio 8";
+    const all_args = [_][:0]const u8{
+        "-ts",  "2",  "-mbl", "1",  "-tcc", "36",
+        "-tia", "8",  "-toa", "6",  "-dcc", "72",
+        "-dia", "20", "-doa", "36", "-sin", "2",
+        "-sid", "4",  "-sit", "6",  "-sio", "8",
+    };
 
     const alloc = std.testing.allocator;
     var arena = std.heap.ArenaAllocator.init(alloc);
     defer arena.deinit();
     const arena_alloc = arena.allocator();
 
+    const allocPrintSentinel = std.fmt.allocPrintSentinel;
     var tmpdir = std.testing.tmpDir(.{});
     defer tmpdir.cleanup();
     const tmpdir_path = try tmpdir.dir.realpathAlloc(arena_alloc, "");
+    const tmpdir_path_output_file_disk = try allocPrintSentinel(arena_alloc, "{s}/{s}", .{
+        tmpdir_path,
+        output_file_disk,
+    }, 0);
+    const tmpdir_path_input_file = try allocPrintSentinel(arena_alloc, "{s}/{s}", .{
+        tmpdir_path,
+        input_file,
+    }, 0);
 
     const test_cases = [_]TestCase{
         // default formatting
         .{
             // stdin -> stdout
-            .cmd = "",
+            .cmd = &.{},
             .in_data = testfile_app_base,
             .ex_data = testfile_app_default,
         },
         .{
             // stdin -> file
-            .cmd = try std.fmt.allocPrint(arena_alloc, "-fo {s}/{s}", .{ tmpdir_path, output_file_disk }),
+            .cmd = &.{ "-fo", tmpdir_path_output_file_disk },
             .in_data = testfile_app_base,
             .ex_data = testfile_app_default,
             .out = .File,
         },
         .{
             // file -> stdout
-            .cmd = try std.fmt.allocPrint(arena_alloc, "{s}/{s} -co", .{ tmpdir_path, input_file }),
+            .cmd = &.{ tmpdir_path_input_file, "-co" },
             .in_data = testfile_app_base,
             .ex_data = testfile_app_default,
             .in = .File,
         },
         .{
             // file1 -> file1
-            .cmd = try std.fmt.allocPrint(arena_alloc, "{s}/{s}", .{ tmpdir_path, input_file }),
+            .cmd = &.{tmpdir_path_input_file},
             .in_data = testfile_app_base,
             .ex_data = testfile_app_default,
             .input_is_expected_output = true,
@@ -165,11 +178,7 @@ test "App Main" {
         },
         .{
             // file1 -> file1 (explicit)
-            .cmd = try std.fmt.allocPrint(
-                arena_alloc,
-                "{s}/{s} -fo {s}/{s}",
-                .{ tmpdir_path, input_file, tmpdir_path, input_file },
-            ),
+            .cmd = &.{ tmpdir_path_input_file, "-fo", tmpdir_path_input_file },
             .in_data = testfile_app_base,
             .ex_data = testfile_app_default,
             .input_is_expected_output = true,
@@ -178,11 +187,7 @@ test "App Main" {
         },
         .{
             // file1 -> file2
-            .cmd = try std.fmt.allocPrint(
-                arena_alloc,
-                "{s}/{s} -fo {s}/{s}",
-                .{ tmpdir_path, input_file, tmpdir_path, output_file_disk },
-            ),
+            .cmd = &.{ tmpdir_path_input_file, "-fo", tmpdir_path_output_file_disk },
             .in_data = testfile_app_base,
             .ex_data = testfile_app_default,
             .in = .File,
@@ -191,39 +196,36 @@ test "App Main" {
         // 'all' formatting
         .{
             // stdin -> stdout
-            .cmd = try std.fmt.allocPrint(arena_alloc, "{s}", .{all_args}),
+            .cmd = &all_args,
             .in_data = testfile_app_base,
             .ex_data = testfile_app_all,
         },
         .{
             // stdin -> file
-            .cmd = try std.fmt.allocPrint(
-                arena_alloc,
-                "-fo {s}/{s} {s}",
-                .{ tmpdir_path, output_file_disk, all_args },
-            ),
+            .cmd = try std.mem.concat(arena_alloc, [:0]const u8, &.{
+                &.{ "-fo", tmpdir_path_output_file_disk },
+                &all_args,
+            }),
             .in_data = testfile_app_base,
             .ex_data = testfile_app_all,
             .out = .File,
         },
         .{
             // file -> stdout
-            .cmd = try std.fmt.allocPrint(
-                arena_alloc,
-                "{s}/{s} -co {s}",
-                .{ tmpdir_path, input_file, all_args },
-            ),
+            .cmd = try std.mem.concat(arena_alloc, [:0]const u8, &.{
+                &.{ tmpdir_path_input_file, "-co" },
+                &all_args,
+            }),
             .in_data = testfile_app_base,
             .ex_data = testfile_app_all,
             .in = .File,
         },
         .{
             // file1 -> file1
-            .cmd = try std.fmt.allocPrint(
-                arena_alloc,
-                "{s}/{s} {s}",
-                .{ tmpdir_path, input_file, all_args },
-            ),
+            .cmd = try std.mem.concat(arena_alloc, [:0]const u8, &.{
+                &.{tmpdir_path_input_file},
+                &all_args,
+            }),
             .in_data = testfile_app_base,
             .ex_data = testfile_app_all,
             .input_is_expected_output = true,
@@ -232,11 +234,10 @@ test "App Main" {
         },
         .{
             // file1 -> file1 (explicit)
-            .cmd = try std.fmt.allocPrint(
-                arena_alloc,
-                "{s}/{s} -fo {s}/{s} {s}",
-                .{ tmpdir_path, input_file, tmpdir_path, input_file, all_args },
-            ),
+            .cmd = try std.mem.concat(arena_alloc, [:0]const u8, &.{
+                &.{ tmpdir_path_input_file, "-fo", tmpdir_path_input_file },
+                &all_args,
+            }),
             .in_data = testfile_app_base,
             .ex_data = testfile_app_all,
             .input_is_expected_output = true,
@@ -245,11 +246,10 @@ test "App Main" {
         },
         .{
             // file1 -> file2
-            .cmd = try std.fmt.allocPrint(
-                arena_alloc,
-                "{s}/{s} -fo {s}/{s} {s}",
-                .{ tmpdir_path, input_file, tmpdir_path, output_file_disk, all_args },
-            ),
+            .cmd = try std.mem.concat(arena_alloc, [:0]const u8, &.{
+                &.{ tmpdir_path_input_file, "-fo", tmpdir_path_output_file_disk },
+                &all_args,
+            }),
             .in_data = testfile_app_base,
             .ex_data = testfile_app_all,
             .in = .File,
@@ -262,7 +262,8 @@ test "App Main" {
     const loop_arena_alloc = arena.allocator();
 
     inline for (test_cases, 0..) |t, i| {
-        errdefer std.debug.print("FAILED {d:0>2} :: {s}\n\n", .{ i, t.cmd });
+        //errdefer std.debug.print("FAILED {d:0>2} :: {any}\n\n", .{ i, t.cmd });
+        errdefer std.debug.print("FAILED {d:0>2}\n\n", .{i});
         defer _ = loop_arena.reset(.retain_capacity);
         defer tmpdir.dir.deleteFile(error_file) catch {};
         defer tmpdir.dir.deleteFile(input_file) catch {};
@@ -295,9 +296,7 @@ test "App Main" {
             const stde = try tmpdir.dir.createFile(error_file, .{});
             defer stde.close();
 
-            var args = try std.process.ArgIteratorGeneral(.{}).init(loop_arena_alloc, t.cmd);
-
-            try Main(loop_arena_alloc, &args, input, output, stde);
+            try Main(loop_arena_alloc, t.cmd, input, output, stde);
         }
 
         const output_buf = blk: {
