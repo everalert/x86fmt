@@ -1,6 +1,6 @@
 .{
     .name = .x86fmt,
-    .version = "1.0.0",
+    .version = "1.0.1",
     .required_zig_version = "0.15.2",
     .fingerprint = 0xd9c36d68ebbd176f,
 

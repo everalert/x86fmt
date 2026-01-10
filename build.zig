@@ -22,42 +22,104 @@ comptime {
 }
 
 pub fn build(b: *Build) void {
-    const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{});
+    const opts = GlobalOptions.Init(b);
+
+    export_module(b, "x86fmt", "src/root.zig");
 
     // TODO: return module from this, and feed into build_binary and build_tests
-    build_module(b, "x86fmt", "src/root.zig");
-    build_binary(b, target, optimize, &.{});
-    build_clean(b);
-    build_tests(b, target, optimize);
+    step_release(b, &opts, &.{});
+    step_install(b, &opts, &.{});
+    step_all_tests(b, &opts);
+    step_clean(b);
 }
 
 // OUTPUT
 
-fn build_module(b: *Build, name: []const u8, path: []const u8) void {
+fn step_release(
+    b: *Build,
+    opts: *const GlobalOptions,
+    imports: []const ModuleImport,
+) void {
+    const step = b.step("release", "make an upstream binary release");
+
+    const release_targets = [_]std.Target.Query{
+        .{ .os_tag = .linux, .cpu_arch = .aarch64 },
+        .{ .os_tag = .linux, .cpu_arch = .x86_64 },
+        .{ .os_tag = .linux, .cpu_arch = .x86 },
+        .{ .os_tag = .linux, .cpu_arch = .riscv64 },
+        .{ .os_tag = .windows, .cpu_arch = .x86_64 },
+        .{ .os_tag = .windows, .cpu_arch = .x86 },
+        //.{ .os_tag = .windows, .cpu_arch = .arm },
+    };
+
+    for (release_targets) |target_query| {
+        const target = b.resolveTargetQuery(target_query);
+        const bin = b.addExecutable(.{
+            .name = "x86fmt",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/main.zig"),
+                .imports = imports,
+                .target = target,
+                .optimize = .ReleaseFast,
+                .strip = true,
+                .single_threaded = true,
+            }),
+        });
+
+        bin.root_module.addAnonymousImport("build.zig.zon", .{ .root_source_file = b.path("build.zig.zon") });
+
+        if (opts.NoBin) {
+            step.dependOn(&bin.step);
+            continue;
+        }
+
+        const t = target.result;
+        const install = b.addInstallArtifact(bin, .{});
+        install.dest_dir = .prefix;
+        install.dest_sub_path = b.fmt(
+            "release/{t}-{t}-{s}",
+            .{ t.os.tag, t.cpu.arch, install.dest_sub_path },
+        );
+
+        if (opts.Asm) {
+            const assembly = b.addInstallBinFile(bin.getEmittedAsm(), b.fmt("{s}.s", .{install.dest_sub_path}));
+            step.dependOn(&assembly.step);
+        }
+
+        step.dependOn(&install.step);
+    }
+}
+
+fn export_module(b: *Build, name: []const u8, path: []const u8) void {
     _ = b.addModule(name, .{ .root_source_file = b.path(path) });
 }
 
-fn build_binary(
+fn step_install(
     b: *Build,
-    target: ResolvedTarget,
-    optimize: OptimizeMode,
+    opts: *const GlobalOptions,
     imports: []const ModuleImport,
 ) void {
-    const small_out: bool = optimize == .ReleaseFast or optimize == .ReleaseSmall;
+    const step = b.getInstallStep();
 
     const bin = b.addExecutable(.{
         .name = "x86fmt",
         .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .imports = imports,
-            .target = target,
-            .optimize = optimize,
-            .strip = small_out,
+            .target = opts.Target,
+            .optimize = opts.Optimize,
+            .strip = opts.Strip,
             .single_threaded = true,
         }),
     });
 
+    if (opts.Asm) {
+        const assembly = b.addInstallBinFile(bin.getEmittedAsm(), "x86fmt.s");
+        step.dependOn(&assembly.step);
+    }
+
+    // TODO: move to general "global imports" thing similar to GlobalOptions; do
+    //  same for imports in other step functions
     //const module_opts = .{
     //    .target = target,
     //    .optimize = optimize,
@@ -66,11 +128,10 @@ fn build_binary(
     //};
     //const zbench_module = b.dependency("zbench", module_opts).module("zbench");
     //exe.root_module.addImport("zbench", zbench_module);
-
     bin.root_module.addAnonymousImport("build.zig.zon", .{ .root_source_file = b.path("build.zig.zon") });
 
-    if (b.option(bool, "no-bin", "skip emitting binary") orelse false) {
-        b.getInstallStep().dependOn(&bin.step);
+    if (opts.NoBin) {
+        step.dependOn(&bin.step);
     } else {
         b.installArtifact(bin);
     }
@@ -90,11 +151,9 @@ const TestDef = struct {
     imports: []const ModuleImport,
 };
 
-fn build_single_test(
+fn step_single_test(
     b: *Build,
-    target: ResolvedTarget,
-    optimize: OptimizeMode,
-    run_test: bool,
+    opts: *const GlobalOptions,
     testdef: TestDef,
 ) void {
     const step = b.step(testdef.name, testdef.desc);
@@ -103,22 +162,23 @@ fn build_single_test(
         .root_module = b.createModule(.{
             .root_source_file = b.path(testdef.entry),
             .imports = testdef.imports,
-            .target = target,
-            .optimize = optimize,
+            .target = opts.Target,
+            .optimize = opts.Optimize,
         }),
     });
 
-    if (run_test) {
-        b.getInstallStep().dependOn(&compile.step);
+    if (opts.NoRun) {
+        step.dependOn(&compile.step);
     } else {
         const run = b.addRunArtifact(compile);
         step.dependOn(&run.step);
     }
 }
 
-fn build_tests(b: *Build, target: ResolvedTarget, optimize: OptimizeMode) void {
-    const no_run = b.option(bool, "no-run", "skip running tests") orelse false;
-
+fn step_all_tests(
+    b: *Build,
+    opts: *const GlobalOptions,
+) void {
     const imports_embeds: []const ModuleImport = blk: {
         const files: []const struct { []const u8, []const u8 } = &.{
             .{ "build.zig.zon", "build.zig.zon" },
@@ -137,21 +197,21 @@ fn build_tests(b: *Build, target: ResolvedTarget, optimize: OptimizeMode) void {
         break :blk &modules;
     };
 
-    build_single_test(b, target, optimize, !no_run, .{
+    step_single_test(b, opts, .{
         .name = "test",
         .desc = "Run all tests, including tests not covered by test-exe or test-module",
         .entry = "src/test.zig",
         .imports = imports_embeds,
     });
 
-    build_single_test(b, target, optimize, !no_run, .{
+    step_single_test(b, opts, .{
         .name = "test-exe",
         .desc = "Run executable tests",
         .entry = "src/main.zig",
         .imports = imports_embeds,
     });
 
-    build_single_test(b, target, optimize, !no_run, .{
+    step_single_test(b, opts, .{
         .name = "test-fmt",
         .desc = "Run formatter tests",
         .entry = "src/root.zig",
@@ -161,7 +221,7 @@ fn build_tests(b: *Build, target: ResolvedTarget, optimize: OptimizeMode) void {
 
 // CLEANUP / BUILD UTIL
 
-fn build_clean(b: *Build) void {
+fn step_clean(b: *Build) void {
     const step = b.step("clean", "Remove build system artifacts");
 
     step.dependOn(&b.addRemoveDirTree(.{ .cwd_relative = b.install_path }).step);
@@ -177,3 +237,25 @@ fn CleanWindows(_: *Step, _: StepMakeOptions) anyerror!void {
     // Windows locks `.zig-cache` during build, so we have to clean it outside the build system
     std.log.err("Cannot remove `.zig-cache` during build process on Windows. Run `./clean.bat`", .{});
 }
+
+// GLOBAL OPTIONS
+
+const GlobalOptions = struct {
+    Target: ResolvedTarget,
+    Optimize: OptimizeMode,
+    NoBin: bool,
+    NoRun: bool,
+    Strip: bool,
+    Asm: bool,
+
+    pub fn Init(b: *Build) GlobalOptions {
+        return .{
+            .Target = b.standardTargetOptions(.{}),
+            .Optimize = b.standardOptimizeOption(.{}),
+            .NoBin = b.option(bool, "no-bin", "skip emitting binary") orelse false,
+            .NoRun = b.option(bool, "no-run", "skip running tests") orelse false,
+            .Strip = b.option(bool, "strip", "strip the binary") orelse false,
+            .Asm = b.option(bool, "asm", "emit assembly alongside binary") orelse false,
+        };
+    }
+};
