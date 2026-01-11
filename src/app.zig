@@ -42,7 +42,7 @@ var STDE_BUF = std.mem.zeroes([BUF_SIZE_LINE_IO]u8);
 /// @stde   stderr File
 pub fn Main(alloc: Allocator, args: []const [:0]const u8, stdi: File, stdo: File, stde: File) !void {
     var settings: AppSettings = .default;
-    settings.ParseArguments(args) catch |err| {
+    settings.ParseArguments(alloc, args) catch |err| {
         var w = stde.writerStreaming(&STDE_BUF);
         defer w.interface.flush() catch {};
         try w.interface.print("Settings Error ({s})", .{@errorName(err)});

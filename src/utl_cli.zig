@@ -2,41 +2,41 @@
 const CLI = @This();
 
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const eql = std.mem.eql;
 const startsWith = std.mem.startsWith;
 
-// TODO: migrate the "business logic" of app_settings.zig to here, where such
-//  logic is not specific to the app; i.e. generalize the cli-specific stuff
+// FIXME: add tests, particularly cases not necessarily covered by app_settings.zig;
+//  can also most likely move some stuff from app_settings.zig, as it is effectively
+//  testing the functionality of the parser, such as cases handling repeated flags.
+// FIXME: add docs comments for the module itself (//!)
 // TODO: clean up "value" vs "option" nomenclature; stop using them interchangeably
 //  for the sake of clarity, update variable/function names if necessary.
 // TODO: some way of associating help documentation with each option, so that
 //  help docs can be updated "for free".
 // TODO: convert setup workflow to be as comptime-biased as possible, so user can
 //  precalculate the cli options and only do minimal setup at runtime.
-// FIXME: add tests, particularly cases not necessarily covered by app_settings.zig;
-//  can also most likely move some stuff from app_settings.zig, as it is effectively
-//  testing the functionality of the parser, such as cases handling repeated flags.
-// FIXME: add docs comments for the module itself (//!)
 
 // FIXME: this was meant to be for flags specifically, and the intent was that a
 //  flag processor will specifically use this list; need to fix nomenclature/usage
 //  so that this stops being conflated with general options conceptually.
 /// Flag-based options
-options: []const Option,
+options: std.MultiArrayList(Option),
 
 /// Option for handling any arguments that aren't caught by other handlers. Use
 /// this to deal with any freestanding arguments that aren't meant to have a label.
 default_option: *const Option,
 
 // TODO: ?? RepeatedOption, if going to always show error message on malformed cli
-pub const Error = error{ MissingFlagOption, UnknownFlag };
+pub const Error = error{ MissingFlagOption, UnknownFlag, AllocationError };
 
-pub const default: CLI = .{
-    .options = &.{},
+pub const empty: CLI = .{
+    .options = .empty,
     .default_option = &NullOption,
 };
 
+// FIXME: add tests
 pub fn ParseArguments(self: *CLI, args: []const []const u8) Error!void {
     var arg_i: usize = 0;
     while (arg_i < args.len) : (arg_i += 1) {
@@ -45,7 +45,9 @@ pub fn ParseArguments(self: *CLI, args: []const []const u8) Error!void {
 
         // flags
         if (opt: {
-            for (self.options) |opt| {
+            const opts_slice = self.options.slice();
+            for (0..opts_slice.len) |i| {
+                const opt = opts_slice.get(i);
                 const n = try opt.Check(args_remaining);
                 if (n > 0) {
                     arg_i += n - 1;
@@ -62,6 +64,18 @@ pub fn ParseArguments(self: *CLI, args: []const []const u8) Error!void {
         const n = try self.default_option.Check(args_remaining);
         arg_i += n -| 1;
     }
+}
+
+// FIXME: add tests
+pub fn AppendOption(self: *CLI, alloc: Allocator, comptime T: type, context: *T) Error!void {
+    self.options.append(alloc, context.option()) catch return error.AllocationError;
+}
+
+// FIXME: add tests
+pub fn AppendOptions(self: *CLI, alloc: Allocator, comptime T: type, context: []T) Error!void {
+    self.options.ensureUnusedCapacity(alloc, context.len) catch return error.AllocationError;
+    for (context) |*ctx|
+        self.options.appendAssumeCapacity(ctx.option());
 }
 
 // FIXME: add tests

@@ -121,10 +121,14 @@ pub const default: AppSettings = .{
 /// Populate settings by parsing command line arguments. Assumes that `args` will
 /// be allocated for the lifetime of the program (until the filenames are no longer
 /// needed).
-pub fn ParseArguments(self: *AppSettings, args: []const [:0]const u8) CLI.Error!void {
+pub fn ParseArguments(self: *AppSettings, alloc: Allocator, args: []const [:0]const u8) CLI.Error!void {
     assert(eql(u8, asBytes(self), asBytes(&AppSettings.default)));
     defer assert(self.IKind != .File or self.IFile.len > 0);
     defer assert(self.OKind != .File or self.OFile.len > 0);
+
+    var arena: std.heap.ArenaAllocator = .init(alloc);
+    defer _ = arena.reset(.free_all);
+    const arena_alloc = arena.allocator();
 
     const StrUserValueT = CLI.UserValueContext([]const u8);
     var ifile_user_value: StrUserValueT = .create(&self.IFile);
@@ -157,28 +161,12 @@ pub fn ParseArguments(self: *AppSettings, args: []const [:0]const u8) CLI.Error!
         .createOpt(&self.Format.SecIndentOther, "-sio", "--section-indent-other"),
     };
 
-    // TODO: standardized way (i.e. part of the cli module) to "push" options to the cli
-    var cli = CLI{
-        .default_option = &ifile_user_value.option(),
-        .options = &opts: {
-            const OPTS_LEN: usize = 2 + ctx_bool.len + ctx_value_u32.len;
-            var opts: [OPTS_LEN]CLI.Option = undefined;
-            var START: usize = 0;
-            defer assert(START == OPTS_LEN);
-
-            opts[0] = okind_flag_co.option();
-            opts[1] = okind_flag_fo.option();
-            START += 2;
-
-            for (&ctx_bool, START..) |*ctx, i| opts[i] = ctx.option();
-            START += ctx_bool.len;
-
-            for (&ctx_value_u32, START..) |*ctx, i| opts[i] = ctx.option();
-            START += ctx_value_u32.len;
-
-            break :opts opts;
-        },
-    };
+    var cli: CLI = .empty;
+    try cli.AppendOption(arena_alloc, IOKindFlagT, &okind_flag_co);
+    try cli.AppendOption(arena_alloc, IOKindStringFlagT, &okind_flag_fo);
+    try cli.AppendOptions(arena_alloc, BoolFlagT, &ctx_bool);
+    try cli.AppendOptions(arena_alloc, U32OptT, &ctx_value_u32);
+    cli.default_option = &ifile_user_value.option();
 
     try cli.ParseArguments(args);
 
@@ -550,7 +538,7 @@ test "Settings" {
         const alloc = std.testing.allocator;
 
         var settings: AppSettings = .default;
-        const result = settings.ParseArguments(t.in);
+        const result = settings.ParseArguments(alloc, t.in);
 
         if (t.err) |t_err| {
             try std.testing.expectError(t_err, result);
