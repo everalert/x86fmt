@@ -5,10 +5,16 @@ const Allocator = std.mem.Allocator;
 
 const App = @import("app.zig");
 
-var mem: [4096]u8 = undefined;
+// TODO: make app actually only use this; eradicate other static memory
+// from codebase
+/// 256KiB
+/// Fits within L2 cache on everything Intel Core i 10th gen onward, including
+/// AMD chips from the same period. Change to 512KiB for Core i 11th gen onward.
+const MEMORY_SIZE = 0x1000 * 256;
+var MEMORY: [MEMORY_SIZE]u8 = undefined;
 
 pub fn main() !void {
-    var fba = std.heap.FixedBufferAllocator.init(&mem);
+    var fba = std.heap.FixedBufferAllocator.init(&MEMORY);
     const alloc = fba.allocator();
 
     var args = try std.process.argsAlloc(alloc);

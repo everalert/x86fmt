@@ -15,11 +15,9 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const eql = std.mem.eql;
+const asBytes = std.mem.asBytes;
 
-const StageTwoCheck = @import("utl_cli.zig").StageTwoCheck;
-const EnumCheckOnce = @import("utl_cli.zig").EnumCheckOnce;
-const BoolCheck = @import("utl_cli.zig").BoolCheck;
-const RawCheck = @import("utl_cli.zig").RawCheck;
+const CLI = @import("utl_cli.zig");
 
 // TODO: use exported module internally too (conflict with utl_branchless being shared)
 const FormatSettings = @import("root.zig").Settings;
@@ -95,9 +93,6 @@ pub const HelpText = HelpTextHeader ++
 
 pub const IOKind = enum { Console, File };
 
-// TODO: ?? RepeatedOption, if going to always show error message on malformed cli
-pub const Error = error{ MissingArgumentValue, UnknownFlag };
-
 Format: FormatSettings,
 IKind: IOKind,
 OKind: IOKind,
@@ -105,15 +100,13 @@ IFile: []const u8,
 OFile: []const u8,
 bAllowTty: bool,
 bShowHelp: bool,
-/// implies that IKind and OKind are both File. if true, OFile will match IFile
+/// Implies that IKind and OKind are both File. If true, OFile will match IFile
 /// but with ".tmp" appended; after formatting, the caller can simply delete
 /// IFile and rename OFile in response to this being true.
 bIOFileSame: bool,
 
-const def_fmt = FormatSettings.default;
-
 pub const default: AppSettings = .{
-    .Format = def_fmt,
+    .Format = .default,
     .bAllowTty = false,
     .bShowHelp = false,
     .bIOFileSame = false,
@@ -123,164 +116,122 @@ pub const default: AppSettings = .{
     .OFile = &.{},
 };
 
-const Waiters = struct {
-    fo: bool,
-    ts: bool,
-    mbl: bool,
-    tcc: bool,
-    tia: bool,
-    toa: bool,
-    dcc: bool,
-    dia: bool,
-    doa: bool,
-    sin: bool,
-    sid: bool,
-    sit: bool,
-    sio: bool,
+// TODO: maybe just take the whole cli, including exe name, to simplify things
+//  so that you don't have to know that you need to skip
+/// Populate settings by parsing command line arguments. Assumes that `args` will
+/// be allocated for the lifetime of the program (until the filenames are no longer
+/// needed).
+pub fn ParseArguments(self: *AppSettings, args: []const [:0]const u8) CLI.Error!void {
+    assert(eql(u8, asBytes(self), asBytes(&AppSettings.default)));
+    defer assert(self.IKind != .File or self.IFile.len > 0);
+    defer assert(self.OKind != .File or self.OFile.len > 0);
 
-    pub const default: Waiters = .{
-        .fo = false,
-        .ts = false,
-        .mbl = false,
-        .tcc = false,
-        .tia = false,
-        .toa = false,
-        .dcc = false,
-        .dia = false,
-        .doa = false,
-        .sin = false,
-        .sid = false,
-        .sit = false,
-        .sio = false,
+    var okind_intermediate: ?IOKind = null;
+    const IOKindFlagT = CLI.FlagContext(?IOKind, void);
+    const IOKindStringFlagT = CLI.FlagContext(?IOKind, []const u8);
+    var okind_flag_co: IOKindFlagT = .createArg(&okind_intermediate, .Console, "-co", &.{});
+    var okind_flag_fo: IOKindStringFlagT = .create(&okind_intermediate, .File, &self.OFile, "-fo", &.{});
+
+    const BoolFlagT = CLI.FlagContext(bool, void);
+    var ctx_bool = [_]BoolFlagT{
+        .createArg(&self.bAllowTty, true, "-tty", "--allow-tty"),
+        .createArg(&self.bShowHelp, true, "-h", "--help"),
     };
 
-    pub fn AnyWaiting(self: *const Waiters) bool {
-        var cnt_true: usize = 0;
-        inline for (std.meta.fields(Waiters)) |f| {
-            comptime assert(f.type == bool);
-            cnt_true += @intFromBool(@field(self, f.name));
-        }
-        return cnt_true > 0;
-    }
-};
+    const U32OptT = CLI.FlagContext(void, u32);
+    var ctx_value_u32 = [_]U32OptT{
+        .createOpt(&self.Format.TabSize, "-ts", "--tab-size"),
+        .createOpt(&self.Format.MaxBlankLines, "-mbl", "--max-blank-lines"),
+        .createOpt(&self.Format.TextComCol, "-tcc", "--text-comment-column"),
+        .createOpt(&self.Format.TextInsMinAdv, "-tia", "--text-instruction-advance"),
+        .createOpt(&self.Format.TextOpsMinAdv, "-toa", "--text-operands-advance"),
+        .createOpt(&self.Format.DataComCol, "-dcc", "--data-comment-column"),
+        .createOpt(&self.Format.DataInsMinAdv, "-dia", "--data-instruction-advance"),
+        .createOpt(&self.Format.DataOpsMinAdv, "-doa", "--data-operands-advance"),
+        .createOpt(&self.Format.SecIndentNone, "-sin", "--section-indent-none"),
+        .createOpt(&self.Format.SecIndentData, "-sid", "--section-indent-data"),
+        .createOpt(&self.Format.SecIndentText, "-sit", "--section-indent-text"),
+        .createOpt(&self.Format.SecIndentOther, "-sio", "--section-indent-other"),
+    };
 
-// TODO: maybe just take the whole cli, including exe name, to simplify things
-//  so that you don't have to know to skip
-/// Parse command line arguments and generate a CLI settings object. Caller is
-/// responsible for freeing memory with `Deinit`, and verifying the existence of
-/// any files indicated in the return value.
-/// @args   *ArgIterator or *ArgIteratorGeneral from std.process
-///         assumes argument containing executable name is already skipped
-pub fn ParseCLI(alloc: Allocator, args: []const [:0]const u8) !AppSettings {
-    var i_kind: ?IOKind = null;
-    var o_kind: ?IOKind = null;
-    var i_file: []const u8 = &.{};
-    var o_file: []const u8 = &.{};
-    var b_allow_tty = false;
-    var b_show_help = false;
-    var b_io_file_same = false;
-    var fmt = def_fmt;
-    errdefer alloc.free(i_file);
-    errdefer alloc.free(o_file);
+    // TODO: standardized way (i.e. part of the cli module) to "push" options to the cli
+    const cli = CLI{
+        .options = &opts: {
+            const OPTS_LEN: usize = 2 + ctx_bool.len + ctx_value_u32.len;
+            var opts: [OPTS_LEN]CLI.Option = undefined;
+            var START: usize = 0;
+            defer assert(START == OPTS_LEN);
 
-    var waiters: Waiters = .default;
+            opts[0] = okind_flag_co.option();
+            opts[1] = okind_flag_fo.option();
+            START += 2;
 
-    //_ = args.next(); // executable location in argv[0] should be skipped before running this
-    //while (args.next()) |arg| {
-    //for (args[1..]) |arg| {
-    for (args) |arg| {
-        const fo = EnumCheckOnce(arg, &.{"-fo"}, IOKind, .File, &o_kind);
-        if (StageTwoCheck(alloc, arg, fo, []const u8, &o_file, &.{}, &waiters.fo))
-            continue;
-        if (EnumCheckOnce(arg, &.{"-co"}, IOKind, .Console, &o_kind))
-            continue;
+            for (&ctx_bool, START..) |*ctx, i| opts[i] = ctx.option();
+            START += ctx_bool.len;
 
-        if (BoolCheck(arg, &.{ "-tty", "--allow-tty" }, &b_allow_tty))
-            continue;
+            for (&ctx_value_u32, START..) |*ctx, i| opts[i] = ctx.option();
+            START += ctx_value_u32.len;
 
-        if (BoolCheck(arg, &.{ "-h", "--help" }, &b_show_help))
-            break;
+            break :opts opts;
+        },
+    };
 
-        const ts = RawCheck(arg, &.{ "-ts", "--tab-size" });
-        if (StageTwoCheck(alloc, arg, ts, usize, &fmt.TabSize, def_fmt.TabSize, &waiters.ts))
-            continue;
-        const mbl = RawCheck(arg, &.{ "-mbl", "--max-blank-lines" });
-        if (StageTwoCheck(alloc, arg, mbl, usize, &fmt.MaxBlankLines, def_fmt.MaxBlankLines, &waiters.mbl))
-            continue;
-        const tcc = RawCheck(arg, &.{ "-tcc", "--text-comment-column" });
-        if (StageTwoCheck(alloc, arg, tcc, usize, &fmt.TextComCol, def_fmt.TextComCol, &waiters.tcc))
-            continue;
-        const tia = RawCheck(arg, &.{ "-tia", "--text-instruction-advance" });
-        if (StageTwoCheck(alloc, arg, tia, usize, &fmt.TextInsMinAdv, def_fmt.TextInsMinAdv, &waiters.tia))
-            continue;
-        const toa = RawCheck(arg, &.{ "-toa", "--text-operands-advance" });
-        if (StageTwoCheck(alloc, arg, toa, usize, &fmt.TextOpsMinAdv, def_fmt.TextOpsMinAdv, &waiters.toa))
-            continue;
-        const dcc = RawCheck(arg, &.{ "-dcc", "--data-comment-column" });
-        if (StageTwoCheck(alloc, arg, dcc, usize, &fmt.DataComCol, def_fmt.DataComCol, &waiters.dcc))
-            continue;
-        const dia = RawCheck(arg, &.{ "-dia", "--data-instruction-advance" });
-        if (StageTwoCheck(alloc, arg, dia, usize, &fmt.DataInsMinAdv, def_fmt.DataInsMinAdv, &waiters.dia))
-            continue;
-        const doa = RawCheck(arg, &.{ "-doa", "--data-operands-advance" });
-        if (StageTwoCheck(alloc, arg, doa, usize, &fmt.DataOpsMinAdv, def_fmt.DataOpsMinAdv, &waiters.doa))
-            continue;
-        const sin = RawCheck(arg, &.{ "-sin", "--section-indent-none" });
-        if (StageTwoCheck(alloc, arg, sin, usize, &fmt.SecIndentNone, def_fmt.SecIndentNone, &waiters.sin))
-            continue;
-        const sid = RawCheck(arg, &.{ "-sid", "--section-indent-data" });
-        if (StageTwoCheck(alloc, arg, sid, usize, &fmt.SecIndentData, def_fmt.SecIndentData, &waiters.sid))
-            continue;
-        const sit = RawCheck(arg, &.{ "-sit", "--section-indent-text" });
-        if (StageTwoCheck(alloc, arg, sit, usize, &fmt.SecIndentText, def_fmt.SecIndentText, &waiters.sit))
-            continue;
-        const sio = RawCheck(arg, &.{ "-sio", "--section-indent-other" });
-        if (StageTwoCheck(alloc, arg, sio, usize, &fmt.SecIndentOther, def_fmt.SecIndentOther, &waiters.sio))
-            continue;
+    // TODO: standardized way (i.e. part of the cli module) to process cli flags
+    var arg_i: usize = 0;
+    while (arg_i < args.len) : (arg_i += 1) {
+        const arg = args[arg_i];
+        const args_remaining = args[arg_i..];
+
+        if (opt: {
+            for (cli.options) |opt| {
+                const n = try opt.Check(args_remaining);
+                if (n > 0) {
+                    arg_i += n - 1;
+                    break :opt true;
+                }
+            }
+            break :opt false;
+        }) continue;
 
         if (arg[0] == '-')
-            return Error.UnknownFlag;
+            return error.UnknownFlag;
 
-        if (i_kind != null) break;
-        i_kind = .File;
-        i_file = try alloc.dupe(u8, arg);
+        if (self.IFile.len > 0) break;
+        self.IFile = arg;
     }
 
-    if (waiters.AnyWaiting()) return Error.MissingArgumentValue;
+    if (self.IFile.len > 0)
+        self.IKind = .File;
 
-    if (i_kind == null) i_kind = .Console;
-    if (o_kind == null) o_kind = i_kind;
-    if (o_kind == .File and (o_file.len == 0 or eql(u8, i_file, o_file))) {
-        alloc.free(o_file);
-        o_file = try std.fmt.allocPrint(alloc, "{s}.tmp", .{i_file});
-        b_io_file_same = true;
+    self.OKind = if (okind_intermediate) |k| k else self.IKind;
+    if (self.OKind == .File and self.OFile.len == 0) {
+        self.OFile = self.IFile;
     }
-
-    assert(i_kind != .File or i_file.len > 0);
-    assert(o_kind != .File or o_file.len > 0);
-    return AppSettings{
-        .Format = fmt,
-        .bAllowTty = b_allow_tty,
-        .bShowHelp = b_show_help,
-        .bIOFileSame = b_io_file_same,
-        .IKind = i_kind.?,
-        .OKind = o_kind.?,
-        .IFile = i_file,
-        .OFile = o_file,
-    };
 }
 
-/// should be called with the original allocator if either IKind or OKind are File
-pub fn Deinit(self: *AppSettings, alloc: Allocator) void {
-    alloc.free(self.IFile);
-    alloc.free(self.OFile);
+// NOTE: logic pulled out from `ParseArguments` in order to prevent polluting it
+// with an allocator api, and allowing some variation in the timing of the resolution
+// (and thus memory commitment) of the output filename.
+/// Finalizes the output filename. When the output file is the input file, a temp
+/// filename will be allocated, replacing `OFile`. Call `Deinit` to cleanup.
+pub fn ResolveOutputFilename(self: *AppSettings, alloc: Allocator) !void {
+    if (self.OKind == .File and (self.OFile.len == 0 or eql(u8, self.IFile, self.OFile))) {
+        self.OFile = try std.fmt.allocPrint(alloc, "{s}.tmp", .{self.IFile});
+        self.bIOFileSame = true;
+    }
+}
+
+/// Must be called if calling `ResolveOutputFilename`.
+pub fn Deinit(self: *const AppSettings, alloc: Allocator) void {
+    if (self.bIOFileSame)
+        alloc.free(self.OFile);
 }
 
 test "Settings" {
     const AppSettingsTestCase = struct {
         in: []const [:0]const u8,
         ex: AppSettings = .default,
-        err: ?Error = null,
+        err: ?CLI.Error = null,
     };
 
     // TODO: handle case where i/o type is double-specified, but the type is not
@@ -498,97 +449,97 @@ test "Settings" {
             },
         },
         // error: two-part options left hanging
-        .{ .in = &.{"-fo"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"-ts"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"-mbl"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"-tcc"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"-tia"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"-toa"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"-dcc"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"-dia"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"-doa"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"-sin"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"-sid"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"-sit"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"-sio"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"--tab-size"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"--max-blank-lines"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"--text-comment-column"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"--text-instruction-advance"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"--text-operands-advance"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"--data-comment-column"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"--data-instruction-advance"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"--data-operands-advance"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"--section-indent-none"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"--section-indent-data"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"--section-indent-text"}, .err = Error.MissingArgumentValue },
-        .{ .in = &.{"--section-indent-other"}, .err = Error.MissingArgumentValue },
+        .{ .in = &.{"-fo"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"-ts"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"-mbl"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"-tcc"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"-tia"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"-toa"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"-dcc"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"-dia"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"-doa"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"-sin"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"-sid"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"-sit"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"-sio"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"--tab-size"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"--max-blank-lines"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"--text-comment-column"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"--text-instruction-advance"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"--text-operands-advance"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"--data-comment-column"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"--data-instruction-advance"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"--data-operands-advance"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"--section-indent-none"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"--section-indent-data"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"--section-indent-text"}, .err = error.MissingFlagOption },
+        .{ .in = &.{"--section-indent-other"}, .err = error.MissingFlagOption },
         // TODO: maybe these cases should simply ignore the missing value since
         //  the value is already set?
         // error: double-specified two-part option left hanging on second spec
-        .{ .in = &.{ "-fo", "filename1", "-fo" }, .err = Error.MissingArgumentValue },
-        .{ .in = &.{ "-ts", "9999", "-ts" }, .err = Error.MissingArgumentValue },
-        .{ .in = &.{ "-mbl", "9999", "-mbl" }, .err = Error.MissingArgumentValue },
-        .{ .in = &.{ "-tcc", "9999", "-tcc" }, .err = Error.MissingArgumentValue },
-        .{ .in = &.{ "-tia", "9999", "-tia" }, .err = Error.MissingArgumentValue },
-        .{ .in = &.{ "-toa", "9999", "-toa" }, .err = Error.MissingArgumentValue },
-        .{ .in = &.{ "-dcc", "9999", "-dcc" }, .err = Error.MissingArgumentValue },
-        .{ .in = &.{ "-dia", "9999", "-dia" }, .err = Error.MissingArgumentValue },
-        .{ .in = &.{ "-doa", "9999", "-doa" }, .err = Error.MissingArgumentValue },
-        .{ .in = &.{ "-sin", "9999", "-sin" }, .err = Error.MissingArgumentValue },
-        .{ .in = &.{ "-sid", "9999", "-sid" }, .err = Error.MissingArgumentValue },
-        .{ .in = &.{ "-sit", "9999", "-sit" }, .err = Error.MissingArgumentValue },
-        .{ .in = &.{ "-sio", "9999", "-sio" }, .err = Error.MissingArgumentValue },
+        .{ .in = &.{ "-fo", "filename1", "-fo" }, .err = error.MissingFlagOption },
+        .{ .in = &.{ "-ts", "9999", "-ts" }, .err = error.MissingFlagOption },
+        .{ .in = &.{ "-mbl", "9999", "-mbl" }, .err = error.MissingFlagOption },
+        .{ .in = &.{ "-tcc", "9999", "-tcc" }, .err = error.MissingFlagOption },
+        .{ .in = &.{ "-tia", "9999", "-tia" }, .err = error.MissingFlagOption },
+        .{ .in = &.{ "-toa", "9999", "-toa" }, .err = error.MissingFlagOption },
+        .{ .in = &.{ "-dcc", "9999", "-dcc" }, .err = error.MissingFlagOption },
+        .{ .in = &.{ "-dia", "9999", "-dia" }, .err = error.MissingFlagOption },
+        .{ .in = &.{ "-doa", "9999", "-doa" }, .err = error.MissingFlagOption },
+        .{ .in = &.{ "-sin", "9999", "-sin" }, .err = error.MissingFlagOption },
+        .{ .in = &.{ "-sid", "9999", "-sid" }, .err = error.MissingFlagOption },
+        .{ .in = &.{ "-sit", "9999", "-sit" }, .err = error.MissingFlagOption },
+        .{ .in = &.{ "-sio", "9999", "-sio" }, .err = error.MissingFlagOption },
         .{
             .in = &.{ "--tab-size", "9999", "--tab-size" },
-            .err = Error.MissingArgumentValue,
+            .err = error.MissingFlagOption,
         },
         .{
             .in = &.{ "--max-blank-lines", "9999", "--max-blank-lines" },
-            .err = Error.MissingArgumentValue,
+            .err = error.MissingFlagOption,
         },
         .{
             .in = &.{ "--text-comment-column", "9999", "--text-comment-column" },
-            .err = Error.MissingArgumentValue,
+            .err = error.MissingFlagOption,
         },
         .{
             .in = &.{ "--text-instruction-advance", "9999", "--text-instruction-advance" },
-            .err = Error.MissingArgumentValue,
+            .err = error.MissingFlagOption,
         },
         .{
             .in = &.{ "--text-operands-advance", "9999", "--text-operands-advance" },
-            .err = Error.MissingArgumentValue,
+            .err = error.MissingFlagOption,
         },
         .{
             .in = &.{ "--data-comment-column", "9999", "--data-comment-column" },
-            .err = Error.MissingArgumentValue,
+            .err = error.MissingFlagOption,
         },
         .{
             .in = &.{ "--data-instruction-advance", "9999", "--data-instruction-advance" },
-            .err = Error.MissingArgumentValue,
+            .err = error.MissingFlagOption,
         },
         .{
             .in = &.{ "--data-operands-advance", "9999", "--data-operands-advance" },
-            .err = Error.MissingArgumentValue,
+            .err = error.MissingFlagOption,
         },
         .{
             .in = &.{ "--section-indent-none", "9999", "--section-indent-none" },
-            .err = Error.MissingArgumentValue,
+            .err = error.MissingFlagOption,
         },
         .{
             .in = &.{ "--section-indent-data", "9999", "--section-indent-data" },
-            .err = Error.MissingArgumentValue,
+            .err = error.MissingFlagOption,
         },
         .{
             .in = &.{ "--section-indent-text", "9999", "--section-indent-text" },
-            .err = Error.MissingArgumentValue,
+            .err = error.MissingFlagOption,
         },
         .{
             .in = &.{ "--section-indent-other", "9999", "--section-indent-other" },
-            .err = Error.MissingArgumentValue,
+            .err = error.MissingFlagOption,
         },
         // error: invalid/unknown flag
-        .{ .in = &.{"--will-never-be-a-real-flag-surely"}, .err = Error.UnknownFlag },
+        .{ .in = &.{"--will-never-be-a-real-flag-surely"}, .err = error.UnknownFlag },
     };
 
     std.testing.log_level = .debug;
@@ -597,14 +548,15 @@ test "Settings" {
         errdefer std.debug.print("FAILED {d:0>2}\n\n", .{i});
         const alloc = std.testing.allocator;
 
-        const result = ParseCLI(alloc, t.in);
+        var settings: AppSettings = .default;
+        const result = settings.ParseArguments(t.in);
 
         if (t.err) |t_err| {
             try std.testing.expectError(t_err, result);
         } else {
-            var r = try result;
-            try std.testing.expectEqualDeep(t.ex, r);
-            r.Deinit(alloc);
+            try settings.ResolveOutputFilename(alloc);
+            defer settings.Deinit(alloc);
+            try std.testing.expectEqualDeep(t.ex, settings);
         }
     }
 }
