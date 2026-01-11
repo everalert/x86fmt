@@ -203,12 +203,18 @@ pub fn FlagContext(comptime ArgT: type, comptime OptT: type) type {
 
             // stage one (arg-value) step
 
-            // NOTE: at some point, a comptime switch to handle supported types
-            //  should go here, but for now we use direct assignment because all
-            //  currently supported types can be trivially compared. this should
-            //  compile error in the event that's no longer true.
-            if ((comptime ArgT != void) and self.arg.* == self.arg_default)
-                self.arg.* = self.arg_value;
+            var can_update_option = true;
+            if (comptime ArgT != void) {
+                // NOTE: at some point, a comptime switch to handle supported types
+                //  should go here, but for now we use direct assignment because all
+                //  currently supported types can be trivially compared. this should
+                //  compile error in the event that's no longer true.
+                if (self.arg.* == self.arg_default) {
+                    self.arg.* = self.arg_value;
+                } else {
+                    can_update_option = false;
+                }
+            }
 
             // stage two (opt-value) step
 
@@ -218,7 +224,12 @@ pub fn FlagContext(comptime ArgT: type, comptime OptT: type) type {
             if (args.len == 1)
                 return error.MissingFlagOption;
 
-            return 1 + try fn_check_user_value(OptT, self.opt, self.opt_default, args[1..]);
+            var temp_opt = self.opt.*;
+            const update_adv_amt = try fn_check_user_value(OptT, &temp_opt, self.opt_default, args[1..]);
+            if (can_update_option)
+                self.opt.* = temp_opt;
+
+            return 1 + update_adv_amt;
         }
 
         // TODO: ?? assert args only have letters, numbers and '-'
@@ -232,7 +243,6 @@ pub fn FlagContext(comptime ArgT: type, comptime OptT: type) type {
 }
 
 // FIXME: add tests
-// FIXME: extract logic from fn_check that is shared with FlagContext
 /// Context that simply takes in an argument and passes it into a value.
 pub fn UserValueContext(comptime OptT: type) type {
     comptime assert_user_value_type(OptT, false);

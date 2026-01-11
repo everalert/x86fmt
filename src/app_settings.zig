@@ -215,9 +215,6 @@ test "Settings" {
         err: ?CLI.Error = null,
     };
 
-    // TODO: handle case where i/o type is double-specified, but the type is not
-    //  the same, like below
-    //      "-co -fo filename"  <- specifying file output when console out already set
     // TODO: ?? double-specifying input/output files specifically should return
     //  error instead of ignore? as a way of communicating correct usage to user
     // TODO: ?? maybe don't return an error in cases like below (double-specified
@@ -225,6 +222,9 @@ test "Settings" {
     //      "-ts 99 -ts" -> Error.MissingArgumentValue
     // TODO: ?? tests for option order (free-ness); not decided on the degree to
     //  which the order is "free", esp. wrt in-out opts
+    // TODO: tests for malformed input, e.g. user provides a string for a numeric
+    //  opt. currently, strings entered for numeric input are ignored; may want
+    //  to return an error instead for ux?
     const test_cases = [_]AppSettingsTestCase{
         .{
             // default settings (stdin -> stdout)
@@ -406,6 +406,25 @@ test "Settings" {
             },
         },
         .{
+            // output set once
+            .in = &.{ "-co", "-fo", "filename" },
+            .ex = blk: {
+                var ex: AppSettings = .default;
+                ex.OKind = .Console;
+                break :blk ex;
+            },
+        },
+        .{
+            // output set once
+            .in = &.{ "-fo", "filename", "-co" },
+            .ex = blk: {
+                var ex: AppSettings = .default;
+                ex.OFile = "filename";
+                ex.OKind = .File;
+                break :blk ex;
+            },
+        },
+        .{
             // file output apply once
             .in = &.{ "-fo", "filename1", "-fo", "filename2" },
             .ex = blk: {
@@ -418,6 +437,7 @@ test "Settings" {
         .{
             // TODO: maybe this case should simply ignore the missing value since
             //  the value is already set?
+            // input file set once
             .in = &.{ "filename1", "filename2" },
             .ex = blk: {
                 var ex: AppSettings = .default;
