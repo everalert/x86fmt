@@ -2,15 +2,10 @@
 const CLI = @This();
 
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 const assert = std.debug.assert;
 const eql = std.mem.eql;
 const startsWith = std.mem.startsWith;
 
-const BLAND = @import("utl_branchless.zig").BLAND;
-
-// NOTE: most of the 'business logic' of app_settings.zig should end up here, since
-//  a lot of it is strictly generic parsing
 // TODO: migrate the "business logic" of app_settings.zig to here, where such
 //  logic is not specific to the app; i.e. generalize the cli-specific stuff
 // TODO: clean up "value" vs "option" nomenclature; stop using them interchangeably
@@ -19,16 +14,55 @@ const BLAND = @import("utl_branchless.zig").BLAND;
 //  help docs can be updated "for free".
 // TODO: convert setup workflow to be as comptime-biased as possible, so user can
 //  precalculate the cli options and only do minimal setup at runtime.
-// FIXME: add tests, particularly cases not necessarily covered by app_settings.zig
+// FIXME: add tests, particularly cases not necessarily covered by app_settings.zig;
+//  can also most likely move some stuff from app_settings.zig, as it is effectively
+//  testing the functionality of the parser, such as cases handling repeated flags.
 // FIXME: add docs comments for the module itself (//!)
 
 // FIXME: this was meant to be for flags specifically, and the intent was that a
 //  flag processor will specifically use this list; need to fix nomenclature/usage
 //  so that this stops being conflated with general options conceptually.
+/// Flag-based options
 options: []const Option,
+
+/// Option for handling any arguments that aren't caught by other handlers. Use
+/// this to deal with any freestanding arguments that aren't meant to have a label.
+default_option: *const Option,
 
 // TODO: ?? RepeatedOption, if going to always show error message on malformed cli
 pub const Error = error{ MissingFlagOption, UnknownFlag };
+
+pub const default: CLI = .{
+    .options = &.{},
+    .default_option = &NullOption,
+};
+
+pub fn ParseArguments(self: *CLI, args: []const []const u8) Error!void {
+    var arg_i: usize = 0;
+    while (arg_i < args.len) : (arg_i += 1) {
+        const arg = args[arg_i];
+        const args_remaining = args[arg_i..];
+
+        // flags
+        if (opt: {
+            for (self.options) |opt| {
+                const n = try opt.Check(args_remaining);
+                if (n > 0) {
+                    arg_i += n - 1;
+                    break :opt true;
+                }
+            }
+            break :opt false;
+        }) continue;
+
+        if (arg[0] == '-')
+            return error.UnknownFlag;
+
+        // default option
+        const n = try self.default_option.Check(args_remaining);
+        arg_i += n -| 1;
+    }
+}
 
 // FIXME: add tests
 /// Interface used to implement the logic to process an argument.
@@ -70,18 +104,15 @@ pub const Option = struct {
 /// that is usually derived from context, but provided as an option to the user
 /// to override), the intended pattern is to use a nullable type as an intermediary.
 pub fn FlagContext(comptime ArgT: type, comptime OptT: type) type {
-    comptime assert(ArgT != void or OptT != void);
-    comptime assert(t: switch (@typeInfo(ArgT)) {
-        .bool, .@"enum", .void => true,
-        .optional => |t| if (t.child != void) continue :t @typeInfo(t.child) else false,
-        else => |t| @compileError("unsupported type: " ++ @typeName(ArgT) ++ " (" ++ @tagName(t) ++ ")"),
-    });
-    comptime assert(switch (@typeInfo(OptT)) {
-        .pointer => OptT == []const u8,
-        .int => |t| t.signedness == .unsigned,
-        .void => true,
-        else => |t| @compileError("unsupported type: " ++ @typeName(OptT) ++ " (" ++ @tagName(t) ++ ")"),
-    });
+    comptime {
+        assert(ArgT != void or OptT != void);
+        assert_user_value_type(OptT, true);
+        assert(t: switch (@typeInfo(ArgT)) {
+            .bool, .@"enum", .void => true,
+            .optional => |t| if (t.child != void) continue :t @typeInfo(t.child) else false,
+            else => |t| @compileError("unsupported type: " ++ @typeName(ArgT) ++ " (" ++ @tagName(t) ++ ")"),
+        });
+    }
 
     return struct {
         short: []const u8, // -<opt>
@@ -187,22 +218,7 @@ pub fn FlagContext(comptime ArgT: type, comptime OptT: type) type {
             if (args.len == 1)
                 return error.MissingFlagOption;
 
-            const b_value_is_default: bool = switch (comptime @typeInfo(OptT)) {
-                .pointer => BLAND(
-                    self.opt.*.len == self.opt_default.len,
-                    self.opt.*.ptr == self.opt_default.ptr,
-                ),
-                .int => self.opt.* == self.opt_default,
-                else => unreachable, // already asserted, void dealt with
-            };
-
-            if (b_value_is_default) switch (comptime @typeInfo(OptT)) {
-                .pointer => self.opt.* = args[1],
-                .int => self.opt.* = std.fmt.parseUnsigned(u32, args[1], 0) catch self.opt_default,
-                else => unreachable, // already asserted, void dealt with
-            };
-
-            return 2;
+            return 1 + try fn_check_user_value(OptT, self.opt, self.opt_default, args[1..]);
         }
 
         // TODO: ?? assert args only have letters, numbers and '-'
@@ -213,4 +229,82 @@ pub fn FlagContext(comptime ArgT: type, comptime OptT: type) type {
             assert(long.len == 0 or (long.len > 2 and startsWith(u8, long, "--")));
         }
     };
+}
+
+// FIXME: add tests
+// FIXME: extract logic from fn_check that is shared with FlagContext
+/// Context that simply takes in an argument and passes it into a value.
+pub fn UserValueContext(comptime OptT: type) type {
+    comptime assert_user_value_type(OptT, false);
+
+    return struct {
+        opt: if (OptT != void) *OptT else void,
+        opt_default: OptT,
+
+        const Context = @This();
+
+        /// Ensures creation of a valid `UserValueContext(OptT)`. The current
+        /// value in `opt.*` is used as the default value.
+        pub fn create(opt: *OptT) Context {
+            return Context{
+                .opt = opt,
+                .opt_default = opt.*,
+            };
+        }
+
+        /// Create `Option` for this instance, to be used in the CLI's option
+        /// list.
+        pub fn option(self: *Context) Option {
+            return .{
+                .parent = @ptrCast(self),
+                .fn_check = fn_check,
+            };
+        }
+
+        fn fn_check(parent: *const anyopaque, args: []const []const u8) Error!usize {
+            assert(args.len > 0);
+            const self: *const Context = @ptrCast(@alignCast(parent));
+            return try fn_check_user_value(OptT, self.opt, self.opt_default, args);
+        }
+    };
+}
+
+/// Option that does nothing, for use as a harmless default behaviour.
+pub const NullOption = Option{
+    .fn_check = null_fn_check,
+    .parent = undefined,
+};
+
+fn null_fn_check(parent: *const anyopaque, args: []const []const u8) Error!usize {
+    assert(args.len > 0);
+    _ = parent;
+    return 1;
+}
+
+inline fn assert_user_value_type(comptime T: type, comptime allow_void: bool) void {
+    assert(switch (@typeInfo(T)) {
+        .pointer => T == []const u8,
+        .int => |t| t.signedness == .unsigned,
+        .void => allow_void,
+        else => |t| @compileError("unsupported type: " ++ @typeName(T) ++ " (" ++ @tagName(t) ++ ")"),
+    });
+}
+
+// FIXME: need to error if argument cannot be interpreted as the expected type
+inline fn fn_check_user_value(comptime T: type, opt: *T, def: T, args: []const []const u8) Error!usize {
+    assert(args.len > 0);
+
+    const b_value_is_default: bool = switch (comptime @typeInfo(T)) {
+        .pointer => opt.*.len == def.len and opt.*.ptr == def.ptr,
+        .int => opt.* == def,
+        else => unreachable, // already asserted, void dealt with
+    };
+
+    if (b_value_is_default) switch (comptime @typeInfo(T)) {
+        .pointer => opt.* = args[0],
+        .int => opt.* = std.fmt.parseUnsigned(u32, args[0], 0) catch def,
+        else => unreachable, // already asserted, void dealt with
+    };
+
+    return 1;
 }

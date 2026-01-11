@@ -126,6 +126,9 @@ pub fn ParseArguments(self: *AppSettings, args: []const [:0]const u8) CLI.Error!
     defer assert(self.IKind != .File or self.IFile.len > 0);
     defer assert(self.OKind != .File or self.OFile.len > 0);
 
+    const StrUserValueT = CLI.UserValueContext([]const u8);
+    var ifile_user_value: StrUserValueT = .create(&self.IFile);
+
     var okind_intermediate: ?IOKind = null;
     const IOKindFlagT = CLI.FlagContext(?IOKind, void);
     const IOKindStringFlagT = CLI.FlagContext(?IOKind, []const u8);
@@ -155,7 +158,8 @@ pub fn ParseArguments(self: *AppSettings, args: []const [:0]const u8) CLI.Error!
     };
 
     // TODO: standardized way (i.e. part of the cli module) to "push" options to the cli
-    const cli = CLI{
+    var cli = CLI{
+        .default_option = &ifile_user_value.option(),
         .options = &opts: {
             const OPTS_LEN: usize = 2 + ctx_bool.len + ctx_value_u32.len;
             var opts: [OPTS_LEN]CLI.Option = undefined;
@@ -176,37 +180,14 @@ pub fn ParseArguments(self: *AppSettings, args: []const [:0]const u8) CLI.Error!
         },
     };
 
-    // TODO: standardized way (i.e. part of the cli module) to process cli flags
-    var arg_i: usize = 0;
-    while (arg_i < args.len) : (arg_i += 1) {
-        const arg = args[arg_i];
-        const args_remaining = args[arg_i..];
-
-        if (opt: {
-            for (cli.options) |opt| {
-                const n = try opt.Check(args_remaining);
-                if (n > 0) {
-                    arg_i += n - 1;
-                    break :opt true;
-                }
-            }
-            break :opt false;
-        }) continue;
-
-        if (arg[0] == '-')
-            return error.UnknownFlag;
-
-        if (self.IFile.len > 0) break;
-        self.IFile = arg;
-    }
+    try cli.ParseArguments(args);
 
     if (self.IFile.len > 0)
         self.IKind = .File;
 
-    self.OKind = if (okind_intermediate) |k| k else self.IKind;
-    if (self.OKind == .File and self.OFile.len == 0) {
+    self.OKind = okind_intermediate orelse self.IKind;
+    if (self.OKind == .File and self.OFile.len == 0)
         self.OFile = self.IFile;
-    }
 }
 
 // NOTE: logic pulled out from `ParseArguments` in order to prevent polluting it
