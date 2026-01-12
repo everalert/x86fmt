@@ -7,9 +7,6 @@ const assert = std.debug.assert;
 const eql = std.mem.eql;
 const startsWith = std.mem.startsWith;
 
-// FIXME: add tests, particularly cases not necessarily covered by app_settings.zig;
-//  can also most likely move some stuff from app_settings.zig, as it is effectively
-//  testing the functionality of the parser, such as cases handling repeated flags.
 // FIXME: add docs comments for the module itself (//!)
 // TODO: clean up "value" vs "option" nomenclature; stop using them interchangeably
 //  for the sake of clarity, update variable/function names if necessary.
@@ -45,20 +42,17 @@ pub const empty: CLI = .{
     .default_option = &NullOption,
 };
 
-// FIXME: add tests
 pub inline fn initCapacity(alloc: Allocator, amt_flags: usize) Error!CLI {
     var cli: CLI = .empty;
     cli.options.ensureUnusedCapacity(alloc, amt_flags) catch return error.AllocationError;
     return cli;
 }
 
-// FIXME: add tests
 pub fn Deinit(self: *CLI, alloc: Allocator) void {
     self.default_option = &NullOption;
     self.options.clearAndFree(alloc);
 }
 
-// FIXME: add tests
 pub fn ParseArguments(self: *CLI, args: []const []const u8) Error!void {
     var arg_i: usize = 0;
     while (arg_i < args.len) : (arg_i += 1) {
@@ -88,19 +82,16 @@ pub fn ParseArguments(self: *CLI, args: []const []const u8) Error!void {
     }
 }
 
-// FIXME: add tests
 pub fn AppendOption(self: *CLI, alloc: Allocator, comptime T: type, context: *T) Error!void {
     self.options.append(alloc, context.option()) catch return error.AllocationError;
 }
 
-// FIXME: add tests
 pub fn AppendOptions(self: *CLI, alloc: Allocator, comptime T: type, context: []T) Error!void {
     self.options.ensureUnusedCapacity(alloc, context.len) catch return error.AllocationError;
     for (context) |*ctx|
         self.options.appendAssumeCapacity(ctx.option());
 }
 
-// FIXME: add tests
 /// Interface used to implement the logic to process an argument.
 ///
 /// For common use-cases of getting values from flags, wrap the value with a
@@ -118,7 +109,10 @@ pub const Option = struct {
     }
 };
 
-// FIXME: add tests
+// ------------------------------------
+// "batteries included" option contexts
+// ------------------------------------
+
 /// Creates a flag-based option type, implementing logic for common use-cases of
 /// flag parsing. This type acts as the context of a flag for values of simple
 /// types, hooking up the parsing logic to a value.
@@ -256,10 +250,13 @@ pub fn FlagContext(comptime ArgT: type, comptime OptT: type) type {
             if (comptime OptT == void)
                 return 1;
 
+            if (!user_value_check_default(OptT, self.opt, self.opt_default))
+                return error.OptionRepeated;
+
             if (args.len == 1)
                 return error.FlagMissingOption;
 
-            return 1 + try fn_check_user_value(OptT, self.opt, self.opt_default, args[1..]);
+            return 1 + try user_value_assign(OptT, self.opt, args[1..]);
         }
 
         // TODO: ?? assert args only have letters, numbers and '-'
@@ -304,10 +301,17 @@ pub fn UserValueContext(comptime OptT: type) type {
         fn fn_check(parent: *const anyopaque, args: []const []const u8) Error!usize {
             assert(args.len > 0);
             const self: *const Context = @ptrCast(@alignCast(parent));
-            return try fn_check_user_value(OptT, self.opt, self.opt_default, args);
+            if (!user_value_check_default(OptT, self.opt, self.opt_default))
+                return error.OptionRepeated;
+            return try user_value_assign(OptT, self.opt, args);
         }
     };
 }
+
+// -----------
+// null option
+// -----------
+// TODO: merge with Option struct?
 
 /// Option that does nothing, for use as a harmless default behaviour.
 pub const NullOption = Option{
@@ -321,6 +325,10 @@ fn null_fn_check(parent: *const anyopaque, args: []const []const u8) Error!usize
     return 1;
 }
 
+// -----------------------
+// user value common logic
+// -----------------------
+
 inline fn assert_user_value_type(comptime T: type, comptime allow_void: bool) void {
     assert(switch (@typeInfo(T)) {
         .pointer => T == []const u8,
@@ -330,21 +338,264 @@ inline fn assert_user_value_type(comptime T: type, comptime allow_void: bool) vo
     });
 }
 
-// FIXME: need to error if argument cannot be interpreted as the expected type
-inline fn fn_check_user_value(comptime T: type, opt: *T, def: T, args: []const []const u8) Error!usize {
-    assert(args.len > 0);
-
-    const b_value_is_default: bool = switch (comptime @typeInfo(T)) {
+inline fn user_value_check_default(comptime T: type, opt: *T, def: T) bool {
+    return switch (comptime @typeInfo(T)) {
         .pointer => eql(u8, opt.*, def), // .pointer should always be []const u8
         .int => opt.* == def,
         else => unreachable, // already asserted, void dealt with
     };
+}
 
-    if (b_value_is_default) switch (comptime @typeInfo(T)) {
+// FIXME: need to error if argument cannot be interpreted as the expected type
+/// Attempt to assign user value. Assumes `user_value_check_default` already
+/// used to assert that the value should be set.
+inline fn user_value_assign(comptime T: type, opt: *T, args: []const []const u8) Error!usize {
+    assert(args.len > 0);
+    switch (comptime @typeInfo(T)) {
         .pointer => opt.* = args[0], // .pointer should always be []const u8
         .int => opt.* = std.fmt.parseUnsigned(u32, args[0], 0) catch return error.OptionInvalid,
         else => unreachable, // already asserted, void dealt with
-    } else return error.OptionRepeated;
-
+    }
     return 1;
+}
+
+// -------
+// testing
+// -------
+
+// FIXME: review todos/fixmes in app_settings.zig to see if any contain
+//  possible tests to add here
+// FIXME: don't really like how all the tests use the same reference impl, seems
+//  brittle; at least think about it a bit more before deciding to drop this fixme
+//  or punt or whatever
+//  - maybe the options generated by the provided contexts etc can be tested
+//    directly, rather than setting up the whole pipeline and testing implicitly?
+// TODO: need to update other error-able tests generally with the same setup as
+//  here, figured out some stuff for better tests that aren't propagated yet.
+// TODO: test UserValueContext; punted because logic is currently implicitly
+//  already tested via FlagContext (calls same functions for opts) and seems
+//  like a pita, but should get around to it eventually.
+//  -> all opt types
+//  -> conflicts between opts sharing same target value
+//  -> error case: opts being written to twice
+//  -> error case: invalid user values for all types
+// TODO: test other error cases? allocation errors? stuff to do with default
+//  opts, like args remaining when no default opt to handle it? etc. (idk if
+//  that default opts stuff should be enforced by the cli system)
+test "CLI" {
+    // stripped-down usage implementation modeled after x86fmt/src/app_settings.zig
+    const TestTarget = struct {
+        const TestTarget = @This();
+
+        val_string: []const u8,
+        val_enum: TestEnum,
+        val_u32: u32,
+        val_u64: u64,
+        val_bool: bool,
+        val_nullable_enum: ?TestEnum,
+
+        pub const empty: TestTarget = .{
+            .val_string = &.{},
+            .val_enum = .no,
+            .val_u32 = 0,
+            .val_u64 = 0,
+            .val_bool = false,
+            .val_nullable_enum = null,
+        };
+
+        const TestEnum = enum { no, yes, maybe };
+
+        /// Test API
+        /// basic flags:
+        /// -ae     --arg-enum-val                  --> val_enum
+        /// -ab     --arg-bool-val                  --> val_bool
+        /// -ane    --arg-nullenum-val              --> val_nullable_enum
+        /// -os     --opt-string-val                --> val_string
+        /// -ou     --opt-u32-val                   --> val_u32
+        /// -aoes   --argopt-enum-string-val        --> val_enum, val_string
+        /// -aobu   --argopt-bool-u32-val           --> val_bool, val_u32
+        /// -aoneu  --argopt-nullenum-u64-val       --> val_nullable_enum, val_u64
+        /// second set of flags for checking opts competing for values:
+        /// -ae2    --arg-enum-val-2                --> val_enum
+        /// -ab2    --arg-bool-val-2                --> val_bool
+        /// -ane2   --arg-nullenum-val-2            --> val_nullable_enum
+        /// -os2    --opt-string-val-2              --> val_string
+        /// -ou2    --opt-u32-val-2                 --> val_u32
+        pub fn ParseArguments(
+            self: *TestTarget,
+            alloc: Allocator,
+            args: []const []const u8,
+        ) Error!void {
+            const FlagArgEnumT = CLI.FlagContext(TestEnum, void);
+            const FlagArgBoolT = CLI.FlagContext(bool, void);
+            const FlagArgNullableEnumT = CLI.FlagContext(?TestEnum, void);
+            const FlagOptStrT = CLI.FlagContext(void, []const u8);
+            const FlagOptU32T = CLI.FlagContext(void, u32);
+            const FlagArgEnumOptStrT = CLI.FlagContext(TestEnum, []const u8);
+            const FlagArgBoolOptU32T = CLI.FlagContext(bool, u32);
+            const FlagArgNullableEnumOptU64T = CLI.FlagContext(?TestEnum, u64);
+            const amt_flags: usize = 13;
+
+            var ctx_enum = [_]FlagArgEnumT{
+                .createArg(&self.val_enum, .yes, "-ae", "--arg-enum-val"),
+                .createArg(&self.val_enum, .yes, "-ae2", "--arg-enum-val-2"),
+            };
+            var ctx_bool = [_]FlagArgBoolT{
+                .createArg(&self.val_bool, true, "-ab", "--arg-bool-val"),
+                .createArg(&self.val_bool, true, "-ab2", "--arg-bool-val-2"),
+            };
+            var ctx_nullable_enum = [_]FlagArgNullableEnumT{
+                .createArg(&self.val_nullable_enum, .yes, "-ane", "--arg-nullenum-val"),
+                .createArg(&self.val_nullable_enum, .yes, "-ane2", "--arg-nullenum-val-2"),
+            };
+            var ctx_string = [_]FlagOptStrT{
+                .createOpt(&self.val_string, "-os", "--opt-string-val"),
+                .createOpt(&self.val_string, "-os2", "--opt-string-val-2"),
+            };
+            var ctx_u32 = [_]FlagOptU32T{
+                .createOpt(&self.val_u32, "-ou", "--opt-u32-val"),
+                .createOpt(&self.val_u32, "-ou2", "--opt-u32-val-2"),
+            };
+            var ctx_enum_str: FlagArgEnumOptStrT =
+                .create(&self.val_enum, .yes, &self.val_string, "-aoes", "--argopt-enum-string-val");
+            var ctx_bool_u32: FlagArgBoolOptU32T =
+                .create(&self.val_bool, true, &self.val_u32, "-aobu", "--argopt-bool-u32-val");
+            var ctx_nullable_enum_u64: FlagArgNullableEnumOptU64T =
+                .create(&self.val_nullable_enum, .yes, &self.val_u64, "-aoneu", "--argopt-nullenum-u64-val");
+
+            var cli: CLI = try .initCapacity(alloc, amt_flags);
+            defer cli.Deinit(alloc);
+            //cli.default_option = void;
+            try cli.AppendOptions(alloc, FlagArgEnumT, &ctx_enum);
+            try cli.AppendOptions(alloc, FlagArgBoolT, &ctx_bool);
+            try cli.AppendOptions(alloc, FlagArgNullableEnumT, &ctx_nullable_enum);
+            try cli.AppendOptions(alloc, FlagOptStrT, &ctx_string);
+            try cli.AppendOptions(alloc, FlagOptU32T, &ctx_u32);
+            try cli.AppendOption(alloc, FlagArgEnumOptStrT, &ctx_enum_str);
+            try cli.AppendOption(alloc, FlagArgBoolOptU32T, &ctx_bool_u32);
+            try cli.AppendOption(alloc, FlagArgNullableEnumOptU64T, &ctx_nullable_enum_u64);
+            assert(cli.options.len == amt_flags);
+
+            try cli.ParseArguments(args);
+        }
+    };
+
+    const TestCase = struct {
+        in: []const [:0]const u8,
+        ex: TestTarget = .empty,
+        err: ?Error = null,
+    };
+
+    const test_cases = [_]TestCase{
+        // FlagContext: all arg types functional
+        .{
+            .in = &.{ "-ae", "-ab", "-ane" },
+            .ex = blk: {
+                var ex: TestTarget = .empty;
+                ex.val_enum = .yes;
+                ex.val_bool = true;
+                ex.val_nullable_enum = .yes;
+                break :blk ex;
+            },
+        },
+        .{
+            .in = &.{ "--arg-enum-val", "--arg-bool-val", "--arg-nullenum-val" },
+            .ex = blk: {
+                var ex: TestTarget = .empty;
+                ex.val_enum = .yes;
+                ex.val_bool = true;
+                ex.val_nullable_enum = .yes;
+                break :blk ex;
+            },
+        },
+        // FlagContext: all opt types functional
+        .{
+            .in = &.{ "-os", "str", "-ou", "10" },
+            .ex = blk: {
+                var ex: TestTarget = .empty;
+                ex.val_string = "str";
+                ex.val_u32 = 10;
+                break :blk ex;
+            },
+        },
+        .{
+            .in = &.{ "--opt-string-val", "str", "--opt-u32-val", "10" },
+            .ex = blk: {
+                var ex: TestTarget = .empty;
+                ex.val_string = "str";
+                ex.val_u32 = 10;
+                break :blk ex;
+            },
+        },
+        // FlagContext: all arg-opt types functional (all transitioned from and to)
+        .{
+            .in = &.{ "-aoes", "str", "-aobu", "10", "-aoneu", "20" },
+            .ex = blk: {
+                var ex: TestTarget = .empty;
+                ex.val_string = "str";
+                ex.val_enum = .yes;
+                ex.val_bool = true;
+                ex.val_u32 = 10;
+                ex.val_u64 = 20;
+                ex.val_nullable_enum = .yes;
+                break :blk ex;
+            },
+        },
+        .{
+            .in = &.{
+                "--argopt-enum-string-val",  "str",
+                "--argopt-bool-u32-val",     "10",
+                "--argopt-nullenum-u64-val", "20",
+            },
+            .ex = blk: {
+                var ex: TestTarget = .empty;
+                ex.val_string = "str";
+                ex.val_enum = .yes;
+                ex.val_bool = true;
+                ex.val_u32 = 10;
+                ex.val_u64 = 20;
+                ex.val_nullable_enum = .yes;
+                break :blk ex;
+            },
+        },
+        // FlagContext: all arg types detect reuse of output value
+        .{ .in = &.{ "-ae", "--arg-enum-val" }, .err = error.FlagRepeated }, // same contexts
+        .{ .in = &.{ "-ab", "--arg-bool-val" }, .err = error.FlagRepeated },
+        .{ .in = &.{ "-ane", "--arg-nullenum-val" }, .err = error.FlagRepeated },
+        .{ .in = &.{ "-ae", "-ae2" }, .err = error.FlagRepeated }, // different contexts
+        .{ .in = &.{ "-ab", "-ab2" }, .err = error.FlagRepeated },
+        .{ .in = &.{ "-ane", "-ane2" }, .err = error.FlagRepeated },
+        // FlagContext: all opt types confirm presence of user input
+        .{ .in = &.{"-os"}, .err = error.FlagMissingOption },
+        .{ .in = &.{"-ou"}, .err = error.FlagMissingOption },
+        // FlagContext: all opt types confirm valid user input
+        // NOTE: no check for string; never invalid at the single-flag level
+        .{ .in = &.{ "-ou", "not-a-number" }, .err = error.OptionInvalid },
+        // FlagContext: all opt types detect reuse of output value
+        .{ .in = &.{ "-os", "str", "--opt-string-val", "str" }, .err = error.OptionRepeated }, // same ctx
+        .{ .in = &.{ "-ou", "10", "--opt-u32-val", "10" }, .err = error.OptionRepeated },
+        .{ .in = &.{ "-os", "str", "-os2", "str" }, .err = error.OptionRepeated }, // dif ctx
+        .{ .in = &.{ "-ou", "10", "-ou2", "10" }, .err = error.OptionRepeated },
+        // FlagContext: all opt types prioritize confirming value reuse over checking input
+        .{ .in = &.{ "-os", "str", "--opt-string-val" }, .err = error.OptionRepeated },
+        .{ .in = &.{ "-ou", "10", "--opt-u32-val" }, .err = error.OptionRepeated },
+        // FlagContext: invalid/unknown flag
+        .{ .in = &.{"--will-never-be-a-real-flag-surely"}, .err = error.FlagUnknown },
+    };
+
+    const alloc = std.testing.allocator;
+    std.testing.log_level = .debug;
+    for (test_cases, 0..) |t, i| {
+        errdefer {
+            const input = std.mem.join(alloc, " ", t.in) catch |err| @errorName(err);
+            defer alloc.free(input);
+            std.debug.print("FAILED {d:0>2} :: \x1B[33m{s}\x1B[0m\n\n", .{ i, input });
+        }
+
+        var target: TestTarget = .empty;
+        const result = target.ParseArguments(alloc, t.in);
+
+        try std.testing.expectEqual(t.err orelse {}, result);
+        if (t.err == null) try std.testing.expectEqualDeep(t.ex, target);
+    }
 }

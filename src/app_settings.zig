@@ -54,67 +54,7 @@ pub const IOKind = enum { Console, File };
 
 pub const Error = CLI.Error;
 
-pub const HelpTextHeader = "x86fmt " ++ VERSION_STRING ++ "\n" ++
-    \\https://github.com/everalert/x86fmt
-    \\
-    \\
-;
-
-pub const HelpTextShort = HelpTextHeader ++
-    \\  [file]              input mode = File, reading from [file]
-    \\  -fo [file]          output mode = File, writing to [file]
-    \\  -co                 output mode = Console (stdout)
-    \\  -tty, --allow-tty   accept console input for stdin (override this dialog)
-    \\
-    \\  -h, --help          Show detailed usage information
-    \\
-    \\
-;
-
-pub const HelpText = HelpTextHeader ++
-    \\  Freely mix and match file and stdio for input and output. See Sample Usage 
-    \\  section for concrete examples.
-    \\
-    \\  Default behaviour   input mode = Console (stdin)
-    \\                      output mode = match input
-    \\
-    \\Options
-    \\
-    \\  [file]              input mode = File, reading from [file]
-    \\  -fo [file]          output mode = File, writing to [file]
-    \\  -co                 output mode = Console (stdout)
-    \\  -tty, --allow-tty   accept console input for stdin (default piped input only)
-    \\
-    \\  -h, --help          Show this dialog without formatting
-    \\
-    \\Cosmetic Options
-    \\  
-    \\  -ts [num],  --tab-size [num]                    default 4
-    \\  -mbl [num], --max-blank-lines [num]             default 2
-    \\  -tcc [num], --text-comment-column [num]         default 40
-    \\  -tia [num], --text-instruction-advance [num]    default 12
-    \\  -toa [num], --text-operands-advance [num]       default 8
-    \\  -dcc [num], --data-comment-column [num]         default 60
-    \\  -dia [num], --data-instruction-advance [num]    default 16
-    \\  -doa [num], --data-operands-advance [num]       default 32
-    \\  -sin [num], --section-indent-none [num]         default 0
-    \\  -sid [num], --section-indent-data [num]         default 0
-    \\  -sit [num], --section-indent-text [num]         default 0
-    \\  -sio [num], --section-indent-other [num]        default 0
-    \\
-    \\Sample Usage
-    \\
-    \\  x86fmt (none)                       input: <stdin>    output: <stdout>
-    \\  x86fmt source.s                     input: source.s   output: source.s
-    \\  x86fmt source.s -co                 input: source.s   output: <stdout>
-    \\  x86fmt source.s -fo output.s        input: source.s   output: output.s
-    \\  x86fmt -fo output.s                 input: <stdin>    output: output.s
-    \\  x86fmt -fo                          (invalid)
-    \\  x86fmt source.s -co -ts 2           input: source.s   output: <stdout>   tab size 2
-    \\
-    \\
-;
-
+// TODO: ?? rename to `fromArguments` change usage to be like a decl literal?
 // TODO: maybe just take the whole cli, including exe name, to simplify things
 //  so that you don't have to know that you need to skip
 /// Populate settings by parsing command line arguments. Assumes that `args` will
@@ -200,6 +140,67 @@ pub fn Deinit(self: *const AppSettings, alloc: Allocator) void {
         alloc.free(self.OFile);
 }
 
+pub const HelpTextHeader = "x86fmt " ++ VERSION_STRING ++ "\n" ++
+    \\https://github.com/everalert/x86fmt
+    \\
+    \\
+;
+
+pub const HelpTextShort = HelpTextHeader ++
+    \\  [file]              input mode = File, reading from [file]
+    \\  -fo [file]          output mode = File, writing to [file]
+    \\  -co                 output mode = Console (stdout)
+    \\  -tty, --allow-tty   accept console input for stdin (override this dialog)
+    \\
+    \\  -h, --help          Show detailed usage information
+    \\
+    \\
+;
+
+pub const HelpText = HelpTextHeader ++
+    \\  Freely mix and match file and stdio for input and output. See Sample Usage 
+    \\  section for concrete examples.
+    \\
+    \\  Default behaviour   input mode = Console (stdin)
+    \\                      output mode = match input
+    \\
+    \\Options
+    \\
+    \\  [file]              input mode = File, reading from [file]
+    \\  -fo [file]          output mode = File, writing to [file]
+    \\  -co                 output mode = Console (stdout)
+    \\  -tty, --allow-tty   accept console input for stdin (default piped input only)
+    \\
+    \\  -h, --help          Show this dialog without formatting
+    \\
+    \\Cosmetic Options
+    \\  
+    \\  -ts [num],  --tab-size [num]                    default 4
+    \\  -mbl [num], --max-blank-lines [num]             default 2
+    \\  -tcc [num], --text-comment-column [num]         default 40
+    \\  -tia [num], --text-instruction-advance [num]    default 12
+    \\  -toa [num], --text-operands-advance [num]       default 8
+    \\  -dcc [num], --data-comment-column [num]         default 60
+    \\  -dia [num], --data-instruction-advance [num]    default 16
+    \\  -doa [num], --data-operands-advance [num]       default 32
+    \\  -sin [num], --section-indent-none [num]         default 0
+    \\  -sid [num], --section-indent-data [num]         default 0
+    \\  -sit [num], --section-indent-text [num]         default 0
+    \\  -sio [num], --section-indent-other [num]        default 0
+    \\
+    \\Sample Usage
+    \\
+    \\  x86fmt (none)                       input: <stdin>    output: <stdout>
+    \\  x86fmt source.s                     input: source.s   output: source.s
+    \\  x86fmt source.s -co                 input: source.s   output: <stdout>
+    \\  x86fmt source.s -fo output.s        input: source.s   output: output.s
+    \\  x86fmt -fo output.s                 input: <stdin>    output: output.s
+    \\  x86fmt -fo                          (invalid)
+    \\  x86fmt source.s -co -ts 2           input: source.s   output: <stdout>   tab size 2
+    \\
+    \\
+;
+
 test "Settings" {
     const AppSettingsTestCase = struct {
         in: []const [:0]const u8,
@@ -207,6 +208,9 @@ test "Settings" {
         err: ?Error = null,
     };
 
+    // TODO: review these tests and cut down any that seem needless now that the
+    //  cli system itself is testing systemic behaviour; punting for now since
+    //  it's strictly not necessary to cut any.
     // TODO: tests for when flags indirectly repeated using long and short form
     //      .{ "-ts", "8", "--tab-size", "12" } // error
     // TODO: tests for flags repeating? currently, flags can technically repeat
@@ -416,65 +420,65 @@ test "Settings" {
         // error: double-specified two-part option left hanging on second spec
         .{ .in = &.{ "-fo", "filename1", "-fo" }, .err = error.FlagRepeated },
         // the following expects FlagMissingOption because there is no arg value
-        .{ .in = &.{ "-ts", "9999", "-ts" }, .err = error.FlagMissingOption },
-        .{ .in = &.{ "-mbl", "9999", "-mbl" }, .err = error.FlagMissingOption },
-        .{ .in = &.{ "-tcc", "9999", "-tcc" }, .err = error.FlagMissingOption },
-        .{ .in = &.{ "-tia", "9999", "-tia" }, .err = error.FlagMissingOption },
-        .{ .in = &.{ "-toa", "9999", "-toa" }, .err = error.FlagMissingOption },
-        .{ .in = &.{ "-dcc", "9999", "-dcc" }, .err = error.FlagMissingOption },
-        .{ .in = &.{ "-dia", "9999", "-dia" }, .err = error.FlagMissingOption },
-        .{ .in = &.{ "-doa", "9999", "-doa" }, .err = error.FlagMissingOption },
-        .{ .in = &.{ "-sin", "9999", "-sin" }, .err = error.FlagMissingOption },
-        .{ .in = &.{ "-sid", "9999", "-sid" }, .err = error.FlagMissingOption },
-        .{ .in = &.{ "-sit", "9999", "-sit" }, .err = error.FlagMissingOption },
-        .{ .in = &.{ "-sio", "9999", "-sio" }, .err = error.FlagMissingOption },
+        .{ .in = &.{ "-ts", "9999", "-ts" }, .err = error.OptionRepeated },
+        .{ .in = &.{ "-mbl", "9999", "-mbl" }, .err = error.OptionRepeated },
+        .{ .in = &.{ "-tcc", "9999", "-tcc" }, .err = error.OptionRepeated },
+        .{ .in = &.{ "-tia", "9999", "-tia" }, .err = error.OptionRepeated },
+        .{ .in = &.{ "-toa", "9999", "-toa" }, .err = error.OptionRepeated },
+        .{ .in = &.{ "-dcc", "9999", "-dcc" }, .err = error.OptionRepeated },
+        .{ .in = &.{ "-dia", "9999", "-dia" }, .err = error.OptionRepeated },
+        .{ .in = &.{ "-doa", "9999", "-doa" }, .err = error.OptionRepeated },
+        .{ .in = &.{ "-sin", "9999", "-sin" }, .err = error.OptionRepeated },
+        .{ .in = &.{ "-sid", "9999", "-sid" }, .err = error.OptionRepeated },
+        .{ .in = &.{ "-sit", "9999", "-sit" }, .err = error.OptionRepeated },
+        .{ .in = &.{ "-sio", "9999", "-sio" }, .err = error.OptionRepeated },
         .{
             .in = &.{ "--tab-size", "9999", "--tab-size" },
-            .err = error.FlagMissingOption,
+            .err = error.OptionRepeated,
         },
         .{
             .in = &.{ "--max-blank-lines", "9999", "--max-blank-lines" },
-            .err = error.FlagMissingOption,
+            .err = error.OptionRepeated,
         },
         .{
             .in = &.{ "--text-comment-column", "9999", "--text-comment-column" },
-            .err = error.FlagMissingOption,
+            .err = error.OptionRepeated,
         },
         .{
             .in = &.{ "--text-instruction-advance", "9999", "--text-instruction-advance" },
-            .err = error.FlagMissingOption,
+            .err = error.OptionRepeated,
         },
         .{
             .in = &.{ "--text-operands-advance", "9999", "--text-operands-advance" },
-            .err = error.FlagMissingOption,
+            .err = error.OptionRepeated,
         },
         .{
             .in = &.{ "--data-comment-column", "9999", "--data-comment-column" },
-            .err = error.FlagMissingOption,
+            .err = error.OptionRepeated,
         },
         .{
             .in = &.{ "--data-instruction-advance", "9999", "--data-instruction-advance" },
-            .err = error.FlagMissingOption,
+            .err = error.OptionRepeated,
         },
         .{
             .in = &.{ "--data-operands-advance", "9999", "--data-operands-advance" },
-            .err = error.FlagMissingOption,
+            .err = error.OptionRepeated,
         },
         .{
             .in = &.{ "--section-indent-none", "9999", "--section-indent-none" },
-            .err = error.FlagMissingOption,
+            .err = error.OptionRepeated,
         },
         .{
             .in = &.{ "--section-indent-data", "9999", "--section-indent-data" },
-            .err = error.FlagMissingOption,
+            .err = error.OptionRepeated,
         },
         .{
             .in = &.{ "--section-indent-text", "9999", "--section-indent-text" },
-            .err = error.FlagMissingOption,
+            .err = error.OptionRepeated,
         },
         .{
             .in = &.{ "--section-indent-other", "9999", "--section-indent-other" },
-            .err = error.FlagMissingOption,
+            .err = error.OptionRepeated,
         },
         // error: invalid/unknown flag
         .{ .in = &.{"--will-never-be-a-real-flag-surely"}, .err = error.FlagUnknown },
