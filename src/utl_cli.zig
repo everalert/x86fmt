@@ -46,6 +46,19 @@ pub const empty: CLI = .{
 };
 
 // FIXME: add tests
+pub inline fn initCapacity(alloc: Allocator, amt_flags: usize) Error!CLI {
+    var cli: CLI = .empty;
+    cli.options.ensureUnusedCapacity(alloc, amt_flags) catch return error.AllocationError;
+    return cli;
+}
+
+// FIXME: add tests
+pub fn Deinit(self: *CLI, alloc: Allocator) void {
+    self.default_option = &NullOption;
+    self.options.clearAndFree(alloc);
+}
+
+// FIXME: add tests
 pub fn ParseArguments(self: *CLI, args: []const []const u8) Error!void {
     var arg_i: usize = 0;
     while (arg_i < args.len) : (arg_i += 1) {

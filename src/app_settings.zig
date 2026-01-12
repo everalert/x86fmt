@@ -25,10 +25,34 @@ const VERSION_STRING = @import("app_version.zig").VERSION_STRING;
 
 // TODO: ?? accept input file without tag only if in first position, and require
 //  something like -fi otherwise
-// TODO: ?? verify any files here instead of punting
-// TODO: ?? return error message instead of ignoring when cli has repeated option;
-//  if used as a general rule, this would also mean `x86fmt file -fo file` would
-//  error
+// TODO: ?? verify any asm input files here instead of punting
+
+Format: FormatSettings,
+IKind: IOKind,
+OKind: IOKind,
+IFile: []const u8,
+OFile: []const u8,
+bAllowTty: bool,
+bShowHelp: bool,
+/// Implies that IKind and OKind are both File. If true, OFile will match IFile
+/// but with ".tmp" appended; after formatting, the caller can simply delete
+/// IFile and rename OFile in response to this being true.
+bIOFileSame: bool,
+
+pub const default: AppSettings = .{
+    .Format = .default,
+    .bAllowTty = false,
+    .bShowHelp = false,
+    .bIOFileSame = false,
+    .IKind = .Console,
+    .OKind = .Console,
+    .IFile = &.{},
+    .OFile = &.{},
+};
+
+pub const IOKind = enum { Console, File };
+
+pub const Error = CLI.Error;
 
 pub const HelpTextHeader = "x86fmt " ++ VERSION_STRING ++ "\n" ++
     \\https://github.com/everalert/x86fmt
@@ -91,37 +115,12 @@ pub const HelpText = HelpTextHeader ++
     \\
 ;
 
-pub const IOKind = enum { Console, File };
-
-Format: FormatSettings,
-IKind: IOKind,
-OKind: IOKind,
-IFile: []const u8,
-OFile: []const u8,
-bAllowTty: bool,
-bShowHelp: bool,
-/// Implies that IKind and OKind are both File. If true, OFile will match IFile
-/// but with ".tmp" appended; after formatting, the caller can simply delete
-/// IFile and rename OFile in response to this being true.
-bIOFileSame: bool,
-
-pub const default: AppSettings = .{
-    .Format = .default,
-    .bAllowTty = false,
-    .bShowHelp = false,
-    .bIOFileSame = false,
-    .IKind = .Console,
-    .OKind = .Console,
-    .IFile = &.{},
-    .OFile = &.{},
-};
-
 // TODO: maybe just take the whole cli, including exe name, to simplify things
 //  so that you don't have to know that you need to skip
 /// Populate settings by parsing command line arguments. Assumes that `args` will
 /// be allocated for the lifetime of the program (until the filenames are no longer
 /// needed).
-pub fn ParseArguments(self: *AppSettings, alloc: Allocator, args: []const [:0]const u8) CLI.Error!void {
+pub fn ParseArguments(self: *AppSettings, alloc: Allocator, args: []const [:0]const u8) Error!void {
     assert(eql(u8, asBytes(self), asBytes(&AppSettings.default)));
     defer assert(self.IKind != .File or self.IFile.len > 0);
     defer assert(self.OKind != .File or self.OFile.len > 0);
@@ -129,6 +128,8 @@ pub fn ParseArguments(self: *AppSettings, alloc: Allocator, args: []const [:0]co
     var arena: std.heap.ArenaAllocator = .init(alloc);
     defer _ = arena.reset(.free_all);
     const arena_alloc = arena.allocator();
+
+    var amt_flags: usize = 0;
 
     const StrUserValueT = CLI.UserValueContext([]const u8);
     var ifile_user_value: StrUserValueT = .create(&self.IFile);
@@ -138,12 +139,14 @@ pub fn ParseArguments(self: *AppSettings, alloc: Allocator, args: []const [:0]co
     const IOKindStringFlagT = CLI.FlagContext(?IOKind, []const u8);
     var okind_flag_co: IOKindFlagT = .createArg(&okind_intermediate, .Console, "-co", &.{});
     var okind_flag_fo: IOKindStringFlagT = .create(&okind_intermediate, .File, &self.OFile, "-fo", &.{});
+    amt_flags += 2;
 
     const BoolFlagT = CLI.FlagContext(bool, void);
     var ctx_bool = [_]BoolFlagT{
         .createArg(&self.bAllowTty, true, "-tty", "--allow-tty"),
         .createArg(&self.bShowHelp, true, "-h", "--help"),
     };
+    amt_flags += ctx_bool.len;
 
     const U32OptT = CLI.FlagContext(void, u32);
     var ctx_value_u32 = [_]U32OptT{
@@ -160,8 +163,9 @@ pub fn ParseArguments(self: *AppSettings, alloc: Allocator, args: []const [:0]co
         .createOpt(&self.Format.SecIndentText, "-sit", "--section-indent-text"),
         .createOpt(&self.Format.SecIndentOther, "-sio", "--section-indent-other"),
     };
+    amt_flags += ctx_value_u32.len;
 
-    var cli: CLI = .empty;
+    var cli: CLI = try .initCapacity(arena_alloc, amt_flags);
     try cli.AppendOption(arena_alloc, IOKindFlagT, &okind_flag_co);
     try cli.AppendOption(arena_alloc, IOKindStringFlagT, &okind_flag_fo);
     try cli.AppendOptions(arena_alloc, BoolFlagT, &ctx_bool);
@@ -200,7 +204,7 @@ test "Settings" {
     const AppSettingsTestCase = struct {
         in: []const [:0]const u8,
         ex: AppSettings = .default,
-        err: ?CLI.Error = null,
+        err: ?Error = null,
     };
 
     // TODO: tests for when flags indirectly repeated using long and short form
