@@ -28,12 +28,15 @@ options: std.MultiArrayList(Option),
 /// this to deal with any freestanding arguments that aren't meant to have a label.
 default_option: *const Option,
 
-// TODO: ?? RepeatedOption, if going to always show error message on malformed cli
 pub const Error = error{
+    // flags
     FlagMissingOption,
     FlagUnknown,
     FlagRepeated,
-    OptionRepeated, // user option/value
+    // user option/value
+    OptionRepeated,
+    OptionInvalid,
+    // misc
     AllocationError,
 };
 
@@ -319,14 +322,14 @@ inline fn fn_check_user_value(comptime T: type, opt: *T, def: T, args: []const [
     assert(args.len > 0);
 
     const b_value_is_default: bool = switch (comptime @typeInfo(T)) {
-        .pointer => opt.*.len == def.len and opt.*.ptr == def.ptr,
+        .pointer => eql(u8, opt.*, def), // .pointer should always be []const u8
         .int => opt.* == def,
         else => unreachable, // already asserted, void dealt with
     };
 
     if (b_value_is_default) switch (comptime @typeInfo(T)) {
-        .pointer => opt.* = args[0],
-        .int => opt.* = std.fmt.parseUnsigned(u32, args[0], 0) catch def,
+        .pointer => opt.* = args[0], // .pointer should always be []const u8
+        .int => opt.* = std.fmt.parseUnsigned(u32, args[0], 0) catch return error.OptionInvalid,
         else => unreachable, // already asserted, void dealt with
     } else return error.OptionRepeated;
 

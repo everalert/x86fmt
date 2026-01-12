@@ -203,7 +203,8 @@ test "Settings" {
         err: ?CLI.Error = null,
     };
 
-    // TODO: tests for when flags repeated using long vs short form
+    // TODO: tests for when flags indirectly repeated using long and short form
+    //      .{ "-ts", "8", "--tab-size", "12" } // error
     // TODO: tests for flags repeating? currently, flags can technically repeat
     //  if they aren't associated with a value or the value they set is the same
     //  as the default, so you could actually physically repeat them, even though
@@ -211,9 +212,6 @@ test "Settings" {
     //  issue because of the current usage's (lack of) coverage
     // TODO: ?? tests for option order (free-ness); not decided on the degree to
     //  which the order is "free", esp. wrt in-out opts
-    // TODO: tests for malformed input, e.g. user provides a string for a numeric
-    //  opt. currently, strings entered for numeric input are ignored; may want
-    //  to return an error instead for ux?
     const test_cases = [_]AppSettingsTestCase{
         .{
             // default settings (stdin -> stdout)
@@ -476,6 +474,8 @@ test "Settings" {
         },
         // error: invalid/unknown flag
         .{ .in = &.{"--will-never-be-a-real-flag-surely"}, .err = error.FlagUnknown },
+        // invalid option: u32
+        .{ .in = &.{ "--section-indent-other", "many-cols-plis" }, .err = error.OptionInvalid },
     };
 
     std.testing.log_level = .debug;
