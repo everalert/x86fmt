@@ -29,7 +29,13 @@ options: std.MultiArrayList(Option),
 default_option: *const Option,
 
 // TODO: ?? RepeatedOption, if going to always show error message on malformed cli
-pub const Error = error{ MissingFlagOption, UnknownFlag, AllocationError };
+pub const Error = error{
+    FlagMissingOption,
+    FlagUnknown,
+    FlagRepeated,
+    OptionRepeated, // user option/value
+    AllocationError,
+};
 
 pub const empty: CLI = .{
     .options = .empty,
@@ -58,7 +64,7 @@ pub fn ParseArguments(self: *CLI, args: []const []const u8) Error!void {
         }) continue;
 
         if (arg[0] == '-')
-            return error.UnknownFlag;
+            return error.FlagUnknown;
 
         // default option
         const n = try self.default_option.Check(args_remaining);
@@ -217,7 +223,6 @@ pub fn FlagContext(comptime ArgT: type, comptime OptT: type) type {
 
             // stage one (arg-value) step
 
-            var can_update_option = true;
             if (comptime ArgT != void) {
                 // NOTE: at some point, a comptime switch to handle supported types
                 //  should go here, but for now we use direct assignment because all
@@ -226,7 +231,7 @@ pub fn FlagContext(comptime ArgT: type, comptime OptT: type) type {
                 if (self.arg.* == self.arg_default) {
                     self.arg.* = self.arg_value;
                 } else {
-                    can_update_option = false;
+                    return error.FlagRepeated;
                 }
             }
 
@@ -236,14 +241,9 @@ pub fn FlagContext(comptime ArgT: type, comptime OptT: type) type {
                 return 1;
 
             if (args.len == 1)
-                return error.MissingFlagOption;
+                return error.FlagMissingOption;
 
-            var temp_opt = self.opt.*;
-            const update_adv_amt = try fn_check_user_value(OptT, &temp_opt, self.opt_default, args[1..]);
-            if (can_update_option)
-                self.opt.* = temp_opt;
-
-            return 1 + update_adv_amt;
+            return 1 + try fn_check_user_value(OptT, self.opt, self.opt_default, args[1..]);
         }
 
         // TODO: ?? assert args only have letters, numbers and '-'
@@ -328,7 +328,7 @@ inline fn fn_check_user_value(comptime T: type, opt: *T, def: T, args: []const [
         .pointer => opt.* = args[0],
         .int => opt.* = std.fmt.parseUnsigned(u32, args[0], 0) catch def,
         else => unreachable, // already asserted, void dealt with
-    };
+    } else return error.OptionRepeated;
 
     return 1;
 }
