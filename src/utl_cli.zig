@@ -60,7 +60,7 @@ const startsWith = std.mem.startsWith;
 /// use `FlagContext` to generate `Option`s for this list. For comptime checking
 /// that a flag is using a standardized context, use the `AddFlag` and `AddFlags`
 /// helpers to add the `Option`s to this list.
-flags: ArrayList(*Option),
+flags: ArrayList(*const Option),
 
 /// `Option` for handling any arguments that aren't caught by other handlers. Use
 /// this to deal with any freestanding arguments that aren't meant to be scoped
@@ -124,14 +124,14 @@ pub fn ParseArguments(self: *CLI, args: []const []const u8) Error!void {
 }
 
 /// Add a single `Option` to the flags list, via an option context.
-pub fn AddFlag(self: *CLI, alloc: Allocator, comptime ContextT: type, context: *ContextT) Error!void {
+pub fn AddFlag(self: *CLI, alloc: Allocator, comptime ContextT: type, context: *const ContextT) Error!void {
     comptime assert(@hasField(ContextT, "option"));
     comptime assert(@FieldType(ContextT, "option") == Option);
     self.flags.append(alloc, &context.option) catch return error.AllocationError;
 }
 
 /// Add an array of `Option`s to the flags list, via an array of option contexts.
-pub fn AddFlags(self: *CLI, alloc: Allocator, comptime ContextT: type, context: []ContextT) Error!void {
+pub fn AddFlags(self: *CLI, alloc: Allocator, comptime ContextT: type, context: []const ContextT) Error!void {
     comptime assert(@hasField(ContextT, "option"));
     comptime assert(@FieldType(ContextT, "option") == Option);
     self.flags.ensureUnusedCapacity(alloc, context.len) catch return error.AllocationError;
@@ -457,31 +457,31 @@ test "CLI" {
             const FlagArgNullableEnumOptU64T = CLI.FlagContext(?TestEnum, u64);
             const amt_flags: usize = 13;
 
-            var ctx_enum = [_]FlagArgEnumT{
+            const ctx_enum = [_]FlagArgEnumT{
                 .createArg(&self.val_enum, .yes, "-ae", "--arg-enum-val"),
                 .createArg(&self.val_enum, .yes, "-ae2", "--arg-enum-val-2"),
             };
-            var ctx_bool = [_]FlagArgBoolT{
+            const ctx_bool = [_]FlagArgBoolT{
                 .createArg(&self.val_bool, true, "-ab", "--arg-bool-val"),
                 .createArg(&self.val_bool, true, "-ab2", "--arg-bool-val-2"),
             };
-            var ctx_nullable_enum = [_]FlagArgNullableEnumT{
+            const ctx_nullable_enum = [_]FlagArgNullableEnumT{
                 .createArg(&self.val_nullable_enum, .yes, "-ane", "--arg-nullenum-val"),
                 .createArg(&self.val_nullable_enum, .yes, "-ane2", "--arg-nullenum-val-2"),
             };
-            var ctx_string = [_]FlagOptStrT{
+            const ctx_string = [_]FlagOptStrT{
                 .createOpt(&self.val_string, "-os", "--opt-string-val"),
                 .createOpt(&self.val_string, "-os2", "--opt-string-val-2"),
             };
-            var ctx_u32 = [_]FlagOptU32T{
+            const ctx_u32 = [_]FlagOptU32T{
                 .createOpt(&self.val_u32, "-ou", "--opt-u32-val"),
                 .createOpt(&self.val_u32, "-ou2", "--opt-u32-val-2"),
             };
-            var ctx_enum_str: FlagArgEnumOptStrT =
+            const ctx_enum_str: FlagArgEnumOptStrT =
                 .create(&self.val_enum, .yes, &self.val_string, "-aoes", "--argopt-enum-string-val");
-            var ctx_bool_u32: FlagArgBoolOptU32T =
+            const ctx_bool_u32: FlagArgBoolOptU32T =
                 .create(&self.val_bool, true, &self.val_u32, "-aobu", "--argopt-bool-u32-val");
-            var ctx_nullable_enum_u64: FlagArgNullableEnumOptU64T =
+            const ctx_nullable_enum_u64: FlagArgNullableEnumOptU64T =
                 .create(&self.val_nullable_enum, .yes, &self.val_u64, "-aoneu", "--argopt-nullenum-u64-val");
 
             var cli: CLI = try .initCapacity(alloc, amt_flags);

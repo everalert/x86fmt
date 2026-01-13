@@ -72,24 +72,24 @@ pub fn ParseArguments(self: *AppSettings, alloc: Allocator, args: []const [:0]co
     var amt_flags: usize = 0;
 
     const StrUserOptionT = CLI.UserOptionContext([]const u8);
-    var ifile_user_value: StrUserOptionT = .create(&self.IFile);
+    const ifile_user_value: StrUserOptionT = .create(&self.IFile);
 
     var okind_intermediate: ?IOKind = null;
     const IOKindFlagT = CLI.FlagContext(?IOKind, void);
     const IOKindStringFlagT = CLI.FlagContext(?IOKind, []const u8);
-    var okind_flag_co: IOKindFlagT = .createArg(&okind_intermediate, .Console, "-co", &.{});
-    var okind_flag_fo: IOKindStringFlagT = .create(&okind_intermediate, .File, &self.OFile, "-fo", &.{});
+    const okind_flag_co: IOKindFlagT = .createArg(&okind_intermediate, .Console, "-co", &.{});
+    const okind_flag_fo: IOKindStringFlagT = .create(&okind_intermediate, .File, &self.OFile, "-fo", &.{});
     amt_flags += 2;
 
     const BoolFlagT = CLI.FlagContext(bool, void);
-    var ctx_bool = [_]BoolFlagT{
+    const ctx_bool = [_]BoolFlagT{
         .createArg(&self.bAllowTty, true, "-tty", "--allow-tty"),
         .createArg(&self.bShowHelp, true, "-h", "--help"),
     };
     amt_flags += ctx_bool.len;
 
     const U32OptT = CLI.FlagContext(void, u32);
-    var ctx_value_u32 = [_]U32OptT{
+    const ctx_value_u32 = [_]U32OptT{
         .createOpt(&self.Format.TabSize, "-ts", "--tab-size"),
         .createOpt(&self.Format.MaxBlankLines, "-mbl", "--max-blank-lines"),
         .createOpt(&self.Format.TextComCol, "-tcc", "--text-comment-column"),
