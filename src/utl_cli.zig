@@ -19,7 +19,7 @@ const startsWith = std.mem.startsWith;
 //  flag processor will specifically use this list; need to fix nomenclature/usage
 //  so that this stops being conflated with general options conceptually.
 /// Flag-based options
-options: std.MultiArrayList(Option),
+options: std.ArrayList(*Option),
 
 /// Option for handling any arguments that aren't caught by other handlers. Use
 /// this to deal with any freestanding arguments that aren't meant to have a label.
@@ -39,7 +39,7 @@ pub const Error = error{
 
 pub const empty: CLI = .{
     .options = .empty,
-    .default_option = &NullOption,
+    .default_option = &.stub,
 };
 
 pub inline fn initCapacity(alloc: Allocator, amt_flags: usize) Error!CLI {
@@ -49,7 +49,7 @@ pub inline fn initCapacity(alloc: Allocator, amt_flags: usize) Error!CLI {
 }
 
 pub fn Deinit(self: *CLI, alloc: Allocator) void {
-    self.default_option = &NullOption;
+    self.default_option = &.stub;
     self.options.clearAndFree(alloc);
 }
 
@@ -61,9 +61,7 @@ pub fn ParseArguments(self: *CLI, args: []const []const u8) Error!void {
 
         // flags
         if (opt: {
-            const opts_slice = self.options.slice();
-            for (0..opts_slice.len) |i| {
-                const opt = opts_slice.get(i);
+            for (self.options.items) |opt| {
                 const n = try opt.Check(args_remaining);
                 if (n > 0) {
                     arg_i += n - 1;
@@ -83,29 +81,51 @@ pub fn ParseArguments(self: *CLI, args: []const []const u8) Error!void {
 }
 
 pub fn AppendOption(self: *CLI, alloc: Allocator, comptime T: type, context: *T) Error!void {
-    self.options.append(alloc, context.option()) catch return error.AllocationError;
+    comptime assert(@hasField(T, "option"));
+    comptime assert(@FieldType(T, "option") == Option);
+    self.options.append(alloc, &context.option) catch return error.AllocationError;
 }
 
 pub fn AppendOptions(self: *CLI, alloc: Allocator, comptime T: type, context: []T) Error!void {
+    comptime assert(@hasField(T, "option"));
+    comptime assert(@FieldType(T, "option") == Option);
     self.options.ensureUnusedCapacity(alloc, context.len) catch return error.AllocationError;
     for (context) |*ctx|
-        self.options.appendAssumeCapacity(ctx.option());
+        self.options.appendAssumeCapacity(&ctx.option);
 }
 
 /// Interface used to implement the logic to process an argument.
 ///
 /// For common use-cases of getting values from flags, wrap the value with a
-/// `FlagContext` and use it to generate its associated `Option`.
+/// `FlagContext` and use it to generate an `Option`.
+///
+/// For non-flag use-cases that simply read a user value, wrap the output value
+/// with a `UserValueContext` and use it to generate an `Option`.
 pub const Option = struct {
-    parent: *anyopaque,
-    fn_check: *const fn (*const anyopaque, []const []const u8) Error!usize,
+    vtbl: *const Vtbl,
+
+    /// Option that does nothing, for use as a harmless default behaviour.
+    pub const stub: Option = .{
+        .vtbl = &.{ .fn_check = null_fn_check },
+    };
+
+    pub const Vtbl = struct {
+        fn_check: *const fn (*const Option, []const []const u8) Error!usize,
+    };
 
     /// Returns the number of arguments consumed by this function. If the return
     /// value is 0, the argument did not match the flag. If the return value is 1
     /// or more, processing for the current argument should short-circuit, and the
     /// argument iterator should be advanced as many times as the return value.
-    pub fn Check(self: Option, args: []const []const u8) Error!usize {
-        return try self.fn_check(self.parent, args);
+    pub fn Check(o: *const Option, args: []const []const u8) Error!usize {
+        assert(args.len > 0);
+        return try o.vtbl.fn_check(o, args);
+    }
+
+    fn null_fn_check(o: *const Option, args: []const []const u8) Error!usize {
+        _ = o;
+        _ = args;
+        return 1;
     }
 };
 
@@ -159,7 +179,10 @@ pub fn FlagContext(comptime ArgT: type, comptime OptT: type) type {
         opt: if (OptT != void) *OptT else void,
         opt_default: OptT,
 
+        option: Option,
+
         const Context = @This();
+
         const ValidCreateFunctionMessage = blk: {
             if (OptT == void) break :blk "use `createArg` function instead";
             if (ArgT == void) break :blk "use `createOpt` function instead";
@@ -171,62 +194,45 @@ pub fn FlagContext(comptime ArgT: type, comptime OptT: type) type {
         pub fn create(arg: *ArgT, arg_val: ArgT, opt: *OptT, short: []const u8, long: []const u8) Context {
             if (comptime ArgT == void) @compileError(ValidCreateFunctionMessage);
             if (comptime OptT == void) @compileError(ValidCreateFunctionMessage);
-            assert_flags(short, long);
-            return Context{
-                .short = short,
-                .long = long,
-                .arg = arg,
-                .arg_default = arg.*,
-                .arg_value = arg_val,
-                .opt = opt,
-                .opt_default = opt.*,
-            };
+            return internal_create(arg, arg_val, opt, short, long);
         }
 
         /// Ensures creation of a valid `FlagContext(ArgT, void)`. The current value
         /// in `arg.*` is used as the default value.
         pub fn createArg(arg: *ArgT, arg_val: ArgT, short: []const u8, long: []const u8) Context {
             if (comptime OptT != void) @compileError(ValidCreateFunctionMessage);
-            assert_flags(short, long);
-            return Context{
-                .short = short,
-                .long = long,
-                .arg = arg,
-                .arg_default = arg.*,
-                .arg_value = arg_val,
-                .opt = {},
-                .opt_default = {},
-            };
+            return internal_create(arg, arg_val, null, short, long);
         }
 
         /// Ensures creation of a valid `FlagContext(void, OptT)`. The current
         /// value in `opt.*` is used as the default value.
         pub fn createOpt(opt: *OptT, short: []const u8, long: []const u8) Context {
             if (comptime ArgT != void) @compileError(ValidCreateFunctionMessage);
+            return internal_create(null, null, opt, short, long);
+        }
+
+        inline fn internal_create(
+            arg: ?*ArgT,
+            arg_val: ?ArgT,
+            opt: ?*OptT,
+            short: []const u8,
+            long: []const u8,
+        ) Context {
             assert_flags(short, long);
             return Context{
+                .arg = if (comptime ArgT == void) {} else arg orelse unreachable,
+                .arg_default = if (comptime ArgT == void) {} else if (arg) |a| a.* else unreachable,
+                .arg_value = if (comptime ArgT == void) {} else arg_val orelse unreachable,
+                .opt = if (comptime OptT == void) {} else opt orelse unreachable,
+                .opt_default = if (comptime OptT == void) {} else if (opt) |o| o.* else unreachable,
                 .short = short,
                 .long = long,
-                .opt = opt,
-                .opt_default = opt.*,
-                .arg = {},
-                .arg_default = {},
-                .arg_value = {},
+                .option = .{ .vtbl = &.{ .fn_check = fn_check } },
             };
         }
 
-        /// Create `Option` for this instance, to be used in the CLI's option
-        /// list.
-        pub fn option(self: *Context) Option {
-            return .{
-                .parent = @ptrCast(self),
-                .fn_check = fn_check,
-            };
-        }
-
-        fn fn_check(parent: *const anyopaque, args: []const []const u8) Error!usize {
-            assert(args.len > 0);
-            const self: *const Context = @ptrCast(@alignCast(parent));
+        fn fn_check(o: *const Option, args: []const []const u8) Error!usize {
+            const self: *const Context = @alignCast(@fieldParentPtr("option", o));
 
             if (!eql(u8, args[0], self.short) and !eql(u8, args[0], self.long))
                 return 0;
@@ -278,6 +284,8 @@ pub fn UserValueContext(comptime OptT: type) type {
         opt: if (OptT != void) *OptT else void,
         opt_default: OptT,
 
+        option: Option,
+
         const Context = @This();
 
         /// Ensures creation of a valid `UserValueContext(OptT)`. The current
@@ -286,43 +294,17 @@ pub fn UserValueContext(comptime OptT: type) type {
             return Context{
                 .opt = opt,
                 .opt_default = opt.*,
+                .option = .{ .vtbl = &.{ .fn_check = fn_check } },
             };
         }
 
-        /// Create `Option` for this instance, to be used in the CLI's option
-        /// list.
-        pub fn option(self: *Context) Option {
-            return .{
-                .parent = @ptrCast(self),
-                .fn_check = fn_check,
-            };
-        }
-
-        fn fn_check(parent: *const anyopaque, args: []const []const u8) Error!usize {
-            assert(args.len > 0);
-            const self: *const Context = @ptrCast(@alignCast(parent));
+        fn fn_check(o: *const Option, args: []const []const u8) Error!usize {
+            const self: *const Context = @alignCast(@fieldParentPtr("option", o));
             if (!user_value_check_default(OptT, self.opt, self.opt_default))
                 return error.OptionRepeated;
             return try user_value_assign(OptT, self.opt, args);
         }
     };
-}
-
-// -----------
-// null option
-// -----------
-// TODO: merge with Option struct?
-
-/// Option that does nothing, for use as a harmless default behaviour.
-pub const NullOption = Option{
-    .fn_check = null_fn_check,
-    .parent = undefined,
-};
-
-fn null_fn_check(parent: *const anyopaque, args: []const []const u8) Error!usize {
-    assert(args.len > 0);
-    _ = parent;
-    return 1;
 }
 
 // -----------------------
@@ -474,7 +456,7 @@ test "CLI" {
             try cli.AppendOption(alloc, FlagArgEnumOptStrT, &ctx_enum_str);
             try cli.AppendOption(alloc, FlagArgBoolOptU32T, &ctx_bool_u32);
             try cli.AppendOption(alloc, FlagArgNullableEnumOptU64T, &ctx_nullable_enum_u64);
-            assert(cli.options.len == amt_flags);
+            assert(cli.options.items.len == amt_flags);
 
             try cli.ParseArguments(args);
         }

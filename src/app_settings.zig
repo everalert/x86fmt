@@ -110,7 +110,7 @@ pub fn ParseArguments(self: *AppSettings, alloc: Allocator, args: []const [:0]co
     try cli.AppendOption(arena_alloc, IOKindStringFlagT, &okind_flag_fo);
     try cli.AppendOptions(arena_alloc, BoolFlagT, &ctx_bool);
     try cli.AppendOptions(arena_alloc, U32OptT, &ctx_value_u32);
-    cli.default_option = &ifile_user_value.option();
+    cli.default_option = &ifile_user_value.option;
 
     try cli.ParseArguments(args);
 
