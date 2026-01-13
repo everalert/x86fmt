@@ -658,7 +658,7 @@ test "Format" {
     };
 
     for (test_cases, 0..) |t, i| {
-        errdefer std.debug.print("\nFAILED {d:0>2}\n\n", .{i});
+        errdefer std.debug.print("FAILED {d:0>2} :: \x1B[33m{s}\x1B[0m\n\n", .{ i, t.in });
 
         var input: std.Io.Reader = .fixed(t.in);
         var output: std.Io.Writer.Allocating = try .initCapacity(std.testing.allocator, 0);
@@ -666,10 +666,8 @@ test "Format" {
 
         const result = fmt.Format(&input, &output.writer, &stde_w, .default);
 
-        if (t.err) |e| {
-            try std.testing.expectError(e, result);
-        } else {
-            try result;
+        try std.testing.expectEqual(t.err orelse {}, result);
+        if (t.err == null) {
             const ex = if (t.ex.len > 0) t.ex else t.in;
             try std.testing.expectEqualStrings(ex, output.written());
             try std.testing.expectEqual(ex.len, output.written().len);
