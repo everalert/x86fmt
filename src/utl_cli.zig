@@ -60,19 +60,19 @@ pub fn ParseArguments(self: *CLI, args: []const []const u8) Error!void {
         const args_remaining = args[arg_i..];
 
         // flags
-        if (opt: {
-            for (self.options.items) |opt| {
-                const n = try opt.Check(args_remaining);
-                if (n > 0) {
-                    arg_i += n - 1;
-                    break :opt true;
+        if (arg[0] == '-') {
+            if (opt: {
+                for (self.options.items) |opt| {
+                    const n = try opt.Check(args_remaining);
+                    if (n > 0) {
+                        arg_i += n - 1;
+                        break :opt true;
+                    }
                 }
-            }
-            break :opt false;
-        }) continue;
-
-        if (arg[0] == '-')
+                break :opt false;
+            }) continue;
             return error.FlagUnknown;
+        }
 
         // default option
         const n = try self.default_option.Check(args_remaining);
