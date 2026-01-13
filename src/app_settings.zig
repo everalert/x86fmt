@@ -59,7 +59,7 @@ pub const Error = CLI.Error;
 //  so that you don't have to know that you need to skip
 /// Populate settings by parsing command line arguments. Assumes that `args` will
 /// be allocated for the lifetime of the program (until the filenames are no longer
-/// needed).
+/// needed). This function does not create any lasting allocations.
 pub fn ParseArguments(self: *AppSettings, alloc: Allocator, args: []const [:0]const u8) Error!void {
     assert(eql(u8, asBytes(self), asBytes(&AppSettings.default)));
     defer assert(self.IKind != .File or self.IFile.len > 0);
@@ -71,8 +71,8 @@ pub fn ParseArguments(self: *AppSettings, alloc: Allocator, args: []const [:0]co
 
     var amt_flags: usize = 0;
 
-    const StrUserValueT = CLI.UserValueContext([]const u8);
-    var ifile_user_value: StrUserValueT = .create(&self.IFile);
+    const StrUserOptionT = CLI.UserOptionContext([]const u8);
+    var ifile_user_value: StrUserOptionT = .create(&self.IFile);
 
     var okind_intermediate: ?IOKind = null;
     const IOKindFlagT = CLI.FlagContext(?IOKind, void);
@@ -106,10 +106,10 @@ pub fn ParseArguments(self: *AppSettings, alloc: Allocator, args: []const [:0]co
     amt_flags += ctx_value_u32.len;
 
     var cli: CLI = try .initCapacity(arena_alloc, amt_flags);
-    try cli.AppendOption(arena_alloc, IOKindFlagT, &okind_flag_co);
-    try cli.AppendOption(arena_alloc, IOKindStringFlagT, &okind_flag_fo);
-    try cli.AppendOptions(arena_alloc, BoolFlagT, &ctx_bool);
-    try cli.AppendOptions(arena_alloc, U32OptT, &ctx_value_u32);
+    try cli.AddFlag(arena_alloc, IOKindFlagT, &okind_flag_co);
+    try cli.AddFlag(arena_alloc, IOKindStringFlagT, &okind_flag_fo);
+    try cli.AddFlags(arena_alloc, BoolFlagT, &ctx_bool);
+    try cli.AddFlags(arena_alloc, U32OptT, &ctx_value_u32);
     cli.default_option = &ifile_user_value.option;
 
     try cli.ParseArguments(args);
@@ -211,13 +211,6 @@ test "Settings" {
     // TODO: review these tests and cut down any that seem needless now that the
     //  cli system itself is testing systemic behaviour; punting for now since
     //  it's strictly not necessary to cut any.
-    // TODO: tests for when flags indirectly repeated using long and short form
-    //      .{ "-ts", "8", "--tab-size", "12" } // error
-    // TODO: tests for flags repeating? currently, flags can technically repeat
-    //  if they aren't associated with a value or the value they set is the same
-    //  as the default, so you could actually physically repeat them, even though
-    //  it would have no effect in current impl. however, this is only not an
-    //  issue because of the current usage's (lack of) coverage
     // TODO: ?? tests for option order (free-ness); not decided on the degree to
     //  which the order is "free", esp. wrt in-out opts
     const test_cases = [_]AppSettingsTestCase{
@@ -383,102 +376,102 @@ test "Settings" {
                 "-dia", "119", "-doa", "120", "-sin", "121",
                 "-sid", "122", "-sit", "123", "-sio", "124",
             },
-            .err = error.OptionRepeated,
+            .err = error.FlagConflict,
         },
         // output set once
-        .{ .in = &.{ "-co", "-fo", "filename" }, .err = error.FlagRepeated },
-        .{ .in = &.{ "-fo", "filename", "-co" }, .err = error.FlagRepeated },
+        .{ .in = &.{ "-co", "-fo", "filename" }, .err = error.FlagConflict },
+        .{ .in = &.{ "-fo", "filename", "-co" }, .err = error.FlagConflict },
         .{ .in = &.{ "filename1", "filename2" }, .err = error.OptionRepeated },
         // file output apply once
-        .{ .in = &.{ "-fo", "filename1", "-fo", "filename2" }, .err = error.FlagRepeated },
+        .{ .in = &.{ "-fo", "filename1", "-fo", "filename2" }, .err = error.FlagConflict },
         // error: two-part options left hanging
-        .{ .in = &.{"-fo"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"-ts"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"-mbl"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"-tcc"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"-tia"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"-toa"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"-dcc"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"-dia"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"-doa"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"-sin"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"-sid"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"-sit"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"-sio"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"--tab-size"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"--max-blank-lines"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"--text-comment-column"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"--text-instruction-advance"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"--text-operands-advance"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"--data-comment-column"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"--data-instruction-advance"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"--data-operands-advance"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"--section-indent-none"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"--section-indent-data"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"--section-indent-text"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"--section-indent-other"}, .err = error.FlagMissingOption },
+        .{ .in = &.{"-fo"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"-ts"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"-mbl"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"-tcc"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"-tia"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"-toa"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"-dcc"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"-dia"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"-doa"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"-sin"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"-sid"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"-sit"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"-sio"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"--tab-size"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"--max-blank-lines"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"--text-comment-column"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"--text-instruction-advance"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"--text-operands-advance"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"--data-comment-column"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"--data-instruction-advance"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"--data-operands-advance"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"--section-indent-none"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"--section-indent-data"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"--section-indent-text"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"--section-indent-other"}, .err = error.FlagOptionMissing },
         // error: double-specified two-part option left hanging on second spec
-        .{ .in = &.{ "-fo", "filename1", "-fo" }, .err = error.FlagRepeated },
-        // the following expects FlagMissingOption because there is no arg value
-        .{ .in = &.{ "-ts", "9999", "-ts" }, .err = error.OptionRepeated },
-        .{ .in = &.{ "-mbl", "9999", "-mbl" }, .err = error.OptionRepeated },
-        .{ .in = &.{ "-tcc", "9999", "-tcc" }, .err = error.OptionRepeated },
-        .{ .in = &.{ "-tia", "9999", "-tia" }, .err = error.OptionRepeated },
-        .{ .in = &.{ "-toa", "9999", "-toa" }, .err = error.OptionRepeated },
-        .{ .in = &.{ "-dcc", "9999", "-dcc" }, .err = error.OptionRepeated },
-        .{ .in = &.{ "-dia", "9999", "-dia" }, .err = error.OptionRepeated },
-        .{ .in = &.{ "-doa", "9999", "-doa" }, .err = error.OptionRepeated },
-        .{ .in = &.{ "-sin", "9999", "-sin" }, .err = error.OptionRepeated },
-        .{ .in = &.{ "-sid", "9999", "-sid" }, .err = error.OptionRepeated },
-        .{ .in = &.{ "-sit", "9999", "-sit" }, .err = error.OptionRepeated },
-        .{ .in = &.{ "-sio", "9999", "-sio" }, .err = error.OptionRepeated },
+        .{ .in = &.{ "-fo", "filename1", "-fo" }, .err = error.FlagConflict },
+        // the following expects FlagOptionMissing because there is no arg value
+        .{ .in = &.{ "-ts", "9999", "-ts" }, .err = error.FlagConflict },
+        .{ .in = &.{ "-mbl", "9999", "-mbl" }, .err = error.FlagConflict },
+        .{ .in = &.{ "-tcc", "9999", "-tcc" }, .err = error.FlagConflict },
+        .{ .in = &.{ "-tia", "9999", "-tia" }, .err = error.FlagConflict },
+        .{ .in = &.{ "-toa", "9999", "-toa" }, .err = error.FlagConflict },
+        .{ .in = &.{ "-dcc", "9999", "-dcc" }, .err = error.FlagConflict },
+        .{ .in = &.{ "-dia", "9999", "-dia" }, .err = error.FlagConflict },
+        .{ .in = &.{ "-doa", "9999", "-doa" }, .err = error.FlagConflict },
+        .{ .in = &.{ "-sin", "9999", "-sin" }, .err = error.FlagConflict },
+        .{ .in = &.{ "-sid", "9999", "-sid" }, .err = error.FlagConflict },
+        .{ .in = &.{ "-sit", "9999", "-sit" }, .err = error.FlagConflict },
+        .{ .in = &.{ "-sio", "9999", "-sio" }, .err = error.FlagConflict },
         .{
             .in = &.{ "--tab-size", "9999", "--tab-size" },
-            .err = error.OptionRepeated,
+            .err = error.FlagConflict,
         },
         .{
             .in = &.{ "--max-blank-lines", "9999", "--max-blank-lines" },
-            .err = error.OptionRepeated,
+            .err = error.FlagConflict,
         },
         .{
             .in = &.{ "--text-comment-column", "9999", "--text-comment-column" },
-            .err = error.OptionRepeated,
+            .err = error.FlagConflict,
         },
         .{
             .in = &.{ "--text-instruction-advance", "9999", "--text-instruction-advance" },
-            .err = error.OptionRepeated,
+            .err = error.FlagConflict,
         },
         .{
             .in = &.{ "--text-operands-advance", "9999", "--text-operands-advance" },
-            .err = error.OptionRepeated,
+            .err = error.FlagConflict,
         },
         .{
             .in = &.{ "--data-comment-column", "9999", "--data-comment-column" },
-            .err = error.OptionRepeated,
+            .err = error.FlagConflict,
         },
         .{
             .in = &.{ "--data-instruction-advance", "9999", "--data-instruction-advance" },
-            .err = error.OptionRepeated,
+            .err = error.FlagConflict,
         },
         .{
             .in = &.{ "--data-operands-advance", "9999", "--data-operands-advance" },
-            .err = error.OptionRepeated,
+            .err = error.FlagConflict,
         },
         .{
             .in = &.{ "--section-indent-none", "9999", "--section-indent-none" },
-            .err = error.OptionRepeated,
+            .err = error.FlagConflict,
         },
         .{
             .in = &.{ "--section-indent-data", "9999", "--section-indent-data" },
-            .err = error.OptionRepeated,
+            .err = error.FlagConflict,
         },
         .{
             .in = &.{ "--section-indent-text", "9999", "--section-indent-text" },
-            .err = error.OptionRepeated,
+            .err = error.FlagConflict,
         },
         .{
             .in = &.{ "--section-indent-other", "9999", "--section-indent-other" },
-            .err = error.OptionRepeated,
+            .err = error.FlagConflict,
         },
         // error: invalid/unknown flag
         .{ .in = &.{"--will-never-be-a-real-flag-surely"}, .err = error.FlagUnknown },

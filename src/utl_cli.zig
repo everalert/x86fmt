@@ -1,36 +1,78 @@
-//! Command line parsing utility.
+//! Command line parsing utility. This module provides a structured way of converting
+//! the content of an argument list into application values and behaviours.
+//!
+//! `Option`
+//! Interface for implementing argument behaviours. Helper types ("contexts")
+//! that implement common parsing behaviours are provided.
+//!
+//! `flags`
+//! Flag-based options denoted by `-` or `--`. Use `FlagContext` for implementation of
+//! common usage patterns, such as setting a pre-set value and taking user input.
+//! Add the actual `Option`s using `AddFlag` and `AddFlags`.
+//!
+//! `default_option`
+//! Standard option for unscoped arguments. For an `Option` that pipes a freestanding
+//! argument to an upstream value, use `UserOptionContext`.
+//!
+//! General workflow:
+//!
+//!  1. Instantiate the CLI via `empty` or `initCapacity`.
+//!  2. Implement any behaviours using `Option` or its helpers (see above).
+//!  3. Populate `flags` and `default_option` (see above).
+//!  4. Process the arguments with `ParseArguments`.
+//!  5. If needed, free memory. The preferred way is to use an arena,
+//!     but `Deinit` is provided for completeness.
+//!
+//! For further details on functionality of individual pieces and other such
+//! notes, see the comments throughout the implementation.
 const CLI = @This();
 
-const std = @import("std");
-const Allocator = std.mem.Allocator;
-const assert = std.debug.assert;
-const eql = std.mem.eql;
-const startsWith = std.mem.startsWith;
-
-// FIXME: add docs comments for the module itself (//!)
-// TODO: clean up "value" vs "option" nomenclature; stop using them interchangeably
-//  for the sake of clarity, update variable/function names if necessary.
+// TODO: "command" functionality that simply associates a keyword argument with a
+//  child CLI. using the same CLI type as a child means that each command can have
+//  all the same functionality with its own scope. if going with this, there will
+//  need to be a way for a CLI to communicate to the parent that its scope is done.
 // TODO: some way of associating help documentation with each option, so that
 //  help docs can be updated "for free".
 // TODO: convert setup workflow to be as comptime-biased as possible, so user can
 //  precalculate the cli options and only do minimal setup at runtime.
 
-// FIXME: this was meant to be for flags specifically, and the intent was that a
-//  flag processor will specifically use this list; need to fix nomenclature/usage
-//  so that this stops being conflated with general options conceptually.
-/// Flag-based options
-options: std.ArrayList(*Option),
+// NOTE: nomenclature
+//  - "option" refers to an atomic user-provided input, i.e. a single argument
+//  - "value" refers to any upstream variable affected by the cli input
+//  - "flag" refers to a customization that only affects one or two values, or
+//    an otherwise self-contained and preferably trivial value scope
 
-/// Option for handling any arguments that aren't caught by other handlers. Use
-/// this to deal with any freestanding arguments that aren't meant to have a label.
+const std = @import("std");
+const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
+const assert = std.debug.assert;
+const eql = std.mem.eql;
+const startsWith = std.mem.startsWith;
+
+// TODO: reconsider how/if stuff going into this should have enforced "flag shape"
+/// Flag-based options.
+///
+/// Flags are assumed to have a form similar to `-flg` or `--flag-name`. During
+/// parsing, only arguments starting with `-` will actually be processed by this
+/// list.
+///
+/// For common flag use-cases and inbuilt checking of the expected flag form,
+/// use `FlagContext` to generate `Option`s for this list. For comptime checking
+/// that a flag is using a standardized context, use the `AddFlag` and `AddFlags`
+/// helpers to add the `Option`s to this list.
+flags: ArrayList(*Option),
+
+/// `Option` for handling any arguments that aren't caught by other handlers. Use
+/// this to deal with any freestanding arguments that aren't meant to be scoped
+/// by a label.
 default_option: *const Option,
 
 pub const Error = error{
     // flags
-    FlagMissingOption,
     FlagUnknown,
-    FlagRepeated,
-    // user option/value
+    FlagConflict,
+    FlagOptionMissing,
+    // custom input
     OptionRepeated,
     OptionInvalid,
     // misc
@@ -38,19 +80,20 @@ pub const Error = error{
 };
 
 pub const empty: CLI = .{
-    .options = .empty,
+    .flags = .empty,
     .default_option = &.stub,
 };
 
 pub inline fn initCapacity(alloc: Allocator, amt_flags: usize) Error!CLI {
     var cli: CLI = .empty;
-    cli.options.ensureUnusedCapacity(alloc, amt_flags) catch return error.AllocationError;
+    cli.flags.ensureUnusedCapacity(alloc, amt_flags) catch return error.AllocationError;
     return cli;
 }
 
+/// Must be called if adding `Option`s to `flags`.
 pub fn Deinit(self: *CLI, alloc: Allocator) void {
     self.default_option = &.stub;
-    self.options.clearAndFree(alloc);
+    self.flags.clearAndFree(alloc);
 }
 
 pub fn ParseArguments(self: *CLI, args: []const []const u8) Error!void {
@@ -62,7 +105,7 @@ pub fn ParseArguments(self: *CLI, args: []const []const u8) Error!void {
         // flags
         if (arg[0] == '-') {
             if (opt: {
-                for (self.options.items) |opt| {
+                for (self.flags.items) |opt| {
                     const n = try opt.Check(args_remaining);
                     if (n > 0) {
                         arg_i += n - 1;
@@ -80,18 +123,20 @@ pub fn ParseArguments(self: *CLI, args: []const []const u8) Error!void {
     }
 }
 
-pub fn AppendOption(self: *CLI, alloc: Allocator, comptime T: type, context: *T) Error!void {
-    comptime assert(@hasField(T, "option"));
-    comptime assert(@FieldType(T, "option") == Option);
-    self.options.append(alloc, &context.option) catch return error.AllocationError;
+/// Add a single `Option` to the flags list, via an option context.
+pub fn AddFlag(self: *CLI, alloc: Allocator, comptime ContextT: type, context: *ContextT) Error!void {
+    comptime assert(@hasField(ContextT, "option"));
+    comptime assert(@FieldType(ContextT, "option") == Option);
+    self.flags.append(alloc, &context.option) catch return error.AllocationError;
 }
 
-pub fn AppendOptions(self: *CLI, alloc: Allocator, comptime T: type, context: []T) Error!void {
-    comptime assert(@hasField(T, "option"));
-    comptime assert(@FieldType(T, "option") == Option);
-    self.options.ensureUnusedCapacity(alloc, context.len) catch return error.AllocationError;
+/// Add an array of `Option`s to the flags list, via an array of option contexts.
+pub fn AddFlags(self: *CLI, alloc: Allocator, comptime ContextT: type, context: []ContextT) Error!void {
+    comptime assert(@hasField(ContextT, "option"));
+    comptime assert(@FieldType(ContextT, "option") == Option);
+    self.flags.ensureUnusedCapacity(alloc, context.len) catch return error.AllocationError;
     for (context) |*ctx|
-        self.options.appendAssumeCapacity(&ctx.option);
+        self.flags.appendAssumeCapacity(&ctx.option);
 }
 
 /// Interface used to implement the logic to process an argument.
@@ -100,7 +145,7 @@ pub fn AppendOptions(self: *CLI, alloc: Allocator, comptime T: type, context: []
 /// `FlagContext` and use it to generate an `Option`.
 ///
 /// For non-flag use-cases that simply read a user value, wrap the output value
-/// with a `UserValueContext` and use it to generate an `Option`.
+/// with a `UserOptionContext` and use it to generate an `Option`.
 pub const Option = struct {
     check: *const fn (*const Option, []const []const u8) Error!usize,
 
@@ -127,22 +172,28 @@ pub const Option = struct {
 // "batteries included" option contexts
 // ------------------------------------
 
+// TODO: prevent flags themselves repeating? currently, flags can technically
+//  repeat if they aren't associated with a value or the value they set is the
+//  same as the default, so you could actually physically repeat them, even
+//  though it would have no effect in current impl. however, this is only not an
+//  issue because of the current usage's (lack of) coverage
 /// Creates a flag-based option type, implementing logic for common use-cases of
 /// flag parsing. This type acts as the context of a flag for values of simple
 /// types, hooking up the parsing logic to a value.
 ///
 /// Use `create`, `createArg` or `createOpt` to create a flag context. Flags can
 /// be specified in both a short form (`-flg`) and a long form (`--flag-name`).
-/// Use `option` to produce the `Option` used to actually process the flag.
+/// Get the `Option` used to actually process the flag from `option`, or simply
+/// pass the object into `AddFlag` or `AddFlags`.
 ///
 /// This type can be used both to set a value when a flag is matched, and read
 /// a user-given value associated with the flag. Users provide such values as
 /// options across two arguments, in the form `--flag-name <value>`. If either
 /// functionality is not desired, set that type to `void`.
 ///
-/// Both argument and user-given values can only be set once, by checking whether
-/// the value matches the default. This way, multiple flags can be associated with
-/// the same value without interfering with each other during parsing.
+/// Both argument and user-given values can only be set once. This is done by
+/// checking whether the value matches the default. This way, multiple flags can
+/// be associated with the same value without interfering with each other.
 ///
 /// For cases where a default argument value is not desired (e.g. for a setting
 /// that is usually derived from context, but provided as an option to the user
@@ -150,7 +201,7 @@ pub const Option = struct {
 pub fn FlagContext(comptime ArgT: type, comptime OptT: type) type {
     comptime {
         assert(ArgT != void or OptT != void);
-        assert_user_value_type(OptT, true);
+        assert_user_option_type(OptT, true);
         assert(t: switch (@typeInfo(ArgT)) {
             .bool, .@"enum", .void => true,
             .optional => |t| if (t.child != void) continue :t @typeInfo(t.child) else false,
@@ -212,7 +263,7 @@ pub fn FlagContext(comptime ArgT: type, comptime OptT: type) type {
             short: []const u8,
             long: []const u8,
         ) Context {
-            assert_flags(short, long);
+            assert_flag_shape(short, long);
             return Context{
                 .arg = if (comptime ArgT == void) {} else arg orelse unreachable,
                 .arg_default = if (comptime ArgT == void) {} else if (arg) |a| a.* else unreachable,
@@ -241,7 +292,7 @@ pub fn FlagContext(comptime ArgT: type, comptime OptT: type) type {
                 if (self.arg.* == self.arg_default) {
                     self.arg.* = self.arg_value;
                 } else {
-                    return error.FlagRepeated;
+                    return error.FlagConflict;
                 }
             }
 
@@ -250,18 +301,18 @@ pub fn FlagContext(comptime ArgT: type, comptime OptT: type) type {
             if (comptime OptT == void)
                 return 1;
 
-            if (!user_value_check_default(OptT, self.opt, self.opt_default))
-                return error.OptionRepeated;
+            if (!user_option_check_default(OptT, self.opt, self.opt_default))
+                return error.FlagConflict;
 
             if (args.len == 1)
-                return error.FlagMissingOption;
+                return error.FlagOptionMissing;
 
-            return 1 + try user_value_assign(OptT, self.opt, args[1..]);
+            return 1 + try user_option_assign(OptT, self.opt, args[1..]);
         }
 
         // TODO: ?? assert args only have letters, numbers and '-'
         // TODO: ?? better assert the form of the short flag
-        fn assert_flags(short: []const u8, long: []const u8) void {
+        fn assert_flag_shape(short: []const u8, long: []const u8) void {
             assert(short.len > 0 or long.len > 0);
             assert(short.len == 0 or (short.len > 1 and startsWith(u8, short, "-")));
             assert(long.len == 0 or (long.len > 2 and startsWith(u8, long, "--")));
@@ -270,9 +321,9 @@ pub fn FlagContext(comptime ArgT: type, comptime OptT: type) type {
 }
 
 // FIXME: add tests
-/// Context that simply takes in an argument and passes it into a value.
-pub fn UserValueContext(comptime OptT: type) type {
-    comptime assert_user_value_type(OptT, false);
+/// Context that simply takes in an argument and parses it as a value.
+pub fn UserOptionContext(comptime OptT: type) type {
+    comptime assert_user_option_type(OptT, false);
 
     return struct {
         opt: if (OptT != void) *OptT else void,
@@ -282,7 +333,7 @@ pub fn UserValueContext(comptime OptT: type) type {
 
         const Context = @This();
 
-        /// Ensures creation of a valid `UserValueContext(OptT)`. The current
+        /// Ensures creation of a valid `UserOptionContext(OptT)`. The current
         /// value in `opt.*` is used as the default value.
         pub fn create(opt: *OptT) Context {
             return Context{
@@ -294,18 +345,18 @@ pub fn UserValueContext(comptime OptT: type) type {
 
         fn fn_check(o: *const Option, args: []const []const u8) Error!usize {
             const self: *const Context = @alignCast(@fieldParentPtr("option", o));
-            if (!user_value_check_default(OptT, self.opt, self.opt_default))
+            if (!user_option_check_default(OptT, self.opt, self.opt_default))
                 return error.OptionRepeated;
-            return try user_value_assign(OptT, self.opt, args);
+            return try user_option_assign(OptT, self.opt, args);
         }
     };
 }
 
 // -----------------------
-// user value common logic
+// user option common logic
 // -----------------------
 
-inline fn assert_user_value_type(comptime T: type, comptime allow_void: bool) void {
+inline fn assert_user_option_type(comptime T: type, comptime allow_void: bool) void {
     assert(switch (@typeInfo(T)) {
         .pointer => T == []const u8,
         .int => |t| t.signedness == .unsigned,
@@ -314,7 +365,7 @@ inline fn assert_user_value_type(comptime T: type, comptime allow_void: bool) vo
     });
 }
 
-inline fn user_value_check_default(comptime T: type, opt: *T, def: T) bool {
+inline fn user_option_check_default(comptime T: type, opt: *T, def: T) bool {
     return switch (comptime @typeInfo(T)) {
         .pointer => eql(u8, opt.*, def), // .pointer should always be []const u8
         .int => opt.* == def,
@@ -323,9 +374,9 @@ inline fn user_value_check_default(comptime T: type, opt: *T, def: T) bool {
 }
 
 // FIXME: need to error if argument cannot be interpreted as the expected type
-/// Attempt to assign user value. Assumes `user_value_check_default` already
+/// Attempt to assign user value. Assumes `user_option_check_default` already
 /// used to assert that the value should be set.
-inline fn user_value_assign(comptime T: type, opt: *T, args: []const []const u8) Error!usize {
+inline fn user_option_assign(comptime T: type, opt: *T, args: []const []const u8) Error!usize {
     assert(args.len > 0);
     switch (comptime @typeInfo(T)) {
         .pointer => opt.* = args[0], // .pointer should always be []const u8
@@ -339,23 +390,19 @@ inline fn user_value_assign(comptime T: type, opt: *T, args: []const []const u8)
 // testing
 // -------
 
-// FIXME: review todos/fixmes in app_settings.zig to see if any contain
-//  possible tests to add here
-// FIXME: don't really like how all the tests use the same reference impl, seems
-//  brittle; at least think about it a bit more before deciding to drop this fixme
-//  or punt or whatever
-//  - maybe the options generated by the provided contexts etc can be tested
-//    directly, rather than setting up the whole pipeline and testing implicitly?
-// TODO: test UserValueContext; punted because logic is currently implicitly
+// TODO: test UserOptionContext; punted because logic is currently implicitly
 //  already tested via FlagContext (calls same functions for opts) and seems
 //  like a pita, but should get around to it eventually.
 //  -> all opt types
 //  -> conflicts between opts sharing same target value
 //  -> error case: opts being written to twice
 //  -> error case: invalid user values for all types
-// TODO: test other error cases? allocation errors? stuff to do with default
+// TODO: ?? test other error cases? allocation errors? stuff to do with default
 //  opts, like args remaining when no default opt to handle it? etc. (idk if
 //  that default opts stuff should be enforced by the cli system)
+// TODO: ?? test option contexts and other parts of the cli structure individually,
+//  rather than by setting up a full pipeline, so that all the pieces are tested
+//  without any unnecessary co-dependencies at the individual test level?
 test "CLI" {
     // stripped-down usage implementation modeled after x86fmt/src/app_settings.zig
     const TestTarget = struct {
@@ -440,15 +487,15 @@ test "CLI" {
             var cli: CLI = try .initCapacity(alloc, amt_flags);
             defer cli.Deinit(alloc);
             //cli.default_option = void;
-            try cli.AppendOptions(alloc, FlagArgEnumT, &ctx_enum);
-            try cli.AppendOptions(alloc, FlagArgBoolT, &ctx_bool);
-            try cli.AppendOptions(alloc, FlagArgNullableEnumT, &ctx_nullable_enum);
-            try cli.AppendOptions(alloc, FlagOptStrT, &ctx_string);
-            try cli.AppendOptions(alloc, FlagOptU32T, &ctx_u32);
-            try cli.AppendOption(alloc, FlagArgEnumOptStrT, &ctx_enum_str);
-            try cli.AppendOption(alloc, FlagArgBoolOptU32T, &ctx_bool_u32);
-            try cli.AppendOption(alloc, FlagArgNullableEnumOptU64T, &ctx_nullable_enum_u64);
-            assert(cli.options.items.len == amt_flags);
+            try cli.AddFlags(alloc, FlagArgEnumT, &ctx_enum);
+            try cli.AddFlags(alloc, FlagArgBoolT, &ctx_bool);
+            try cli.AddFlags(alloc, FlagArgNullableEnumT, &ctx_nullable_enum);
+            try cli.AddFlags(alloc, FlagOptStrT, &ctx_string);
+            try cli.AddFlags(alloc, FlagOptU32T, &ctx_u32);
+            try cli.AddFlag(alloc, FlagArgEnumOptStrT, &ctx_enum_str);
+            try cli.AddFlag(alloc, FlagArgBoolOptU32T, &ctx_bool_u32);
+            try cli.AddFlag(alloc, FlagArgNullableEnumOptU64T, &ctx_nullable_enum_u64);
+            assert(cli.flags.items.len == amt_flags);
 
             try cli.ParseArguments(args);
         }
@@ -533,26 +580,26 @@ test "CLI" {
             },
         },
         // FlagContext: all arg types detect reuse of output value
-        .{ .in = &.{ "-ae", "--arg-enum-val" }, .err = error.FlagRepeated }, // same contexts
-        .{ .in = &.{ "-ab", "--arg-bool-val" }, .err = error.FlagRepeated },
-        .{ .in = &.{ "-ane", "--arg-nullenum-val" }, .err = error.FlagRepeated },
-        .{ .in = &.{ "-ae", "-ae2" }, .err = error.FlagRepeated }, // different contexts
-        .{ .in = &.{ "-ab", "-ab2" }, .err = error.FlagRepeated },
-        .{ .in = &.{ "-ane", "-ane2" }, .err = error.FlagRepeated },
+        .{ .in = &.{ "-ae", "--arg-enum-val" }, .err = error.FlagConflict }, // same contexts
+        .{ .in = &.{ "-ab", "--arg-bool-val" }, .err = error.FlagConflict },
+        .{ .in = &.{ "-ane", "--arg-nullenum-val" }, .err = error.FlagConflict },
+        .{ .in = &.{ "-ae", "-ae2" }, .err = error.FlagConflict }, // different contexts
+        .{ .in = &.{ "-ab", "-ab2" }, .err = error.FlagConflict },
+        .{ .in = &.{ "-ane", "-ane2" }, .err = error.FlagConflict },
         // FlagContext: all opt types confirm presence of user input
-        .{ .in = &.{"-os"}, .err = error.FlagMissingOption },
-        .{ .in = &.{"-ou"}, .err = error.FlagMissingOption },
+        .{ .in = &.{"-os"}, .err = error.FlagOptionMissing },
+        .{ .in = &.{"-ou"}, .err = error.FlagOptionMissing },
         // FlagContext: all opt types confirm valid user input
         // NOTE: no check for string; never invalid at the single-flag level
         .{ .in = &.{ "-ou", "not-a-number" }, .err = error.OptionInvalid },
         // FlagContext: all opt types detect reuse of output value
-        .{ .in = &.{ "-os", "str", "--opt-string-val", "str" }, .err = error.OptionRepeated }, // same ctx
-        .{ .in = &.{ "-ou", "10", "--opt-u32-val", "10" }, .err = error.OptionRepeated },
-        .{ .in = &.{ "-os", "str", "-os2", "str" }, .err = error.OptionRepeated }, // dif ctx
-        .{ .in = &.{ "-ou", "10", "-ou2", "10" }, .err = error.OptionRepeated },
+        .{ .in = &.{ "-os", "str", "--opt-string-val", "str" }, .err = error.FlagConflict }, // same ctx
+        .{ .in = &.{ "-ou", "10", "--opt-u32-val", "10" }, .err = error.FlagConflict },
+        .{ .in = &.{ "-os", "str", "-os2", "str" }, .err = error.FlagConflict }, // dif ctx
+        .{ .in = &.{ "-ou", "10", "-ou2", "10" }, .err = error.FlagConflict },
         // FlagContext: all opt types prioritize confirming value reuse over checking input
-        .{ .in = &.{ "-os", "str", "--opt-string-val" }, .err = error.OptionRepeated },
-        .{ .in = &.{ "-ou", "10", "--opt-u32-val" }, .err = error.OptionRepeated },
+        .{ .in = &.{ "-os", "str", "--opt-string-val" }, .err = error.FlagConflict },
+        .{ .in = &.{ "-ou", "10", "--opt-u32-val" }, .err = error.FlagConflict },
         // FlagContext: invalid/unknown flag
         .{ .in = &.{"--will-never-be-a-real-flag-surely"}, .err = error.FlagUnknown },
     };
