@@ -20,9 +20,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- New release targets: `linux-aarch64` `linux-riscv64` `linux-x86_64` `linux-x86` 
+  `windows-x86_64` `windows-x86`.
+- Internal: `release` build step, for building official release targets. 
+- Internal: `no-bin` build step, to `--watch` builds without emitting binaries.
+- Internal: `no-run` build step, to `--watch` tests without running them.
+- Internal: `asm` build step, for emitting assembly alongside binaries.
+
 ### Changed
 
-- Updated Zig version from `0.14.1` to `0.15.2`.
+- Improved error reporting for malformed command line input.
+- Internal: Updated Zig version from `0.14.1` to `0.15.2`.
+- Internal: Rewrote command line parser. Parser now implements an API.
+
+### Fixed
+
+- Cleaned up handling of some edge cases in command line parsing.
+- Internal: Cleaned up ugly output from `clean` script.
 
 
 ## [1.0.0] - 2026-01-05
