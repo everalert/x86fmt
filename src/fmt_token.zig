@@ -189,17 +189,15 @@ test "Tokenize" {
 
     std.testing.log_level = .debug;
     for (test_cases, 0..) |t, i| {
-        errdefer std.debug.print("FAILED {d:0>2}\n\n", .{i});
+        errdefer std.debug.print("FAILED {d:0>2} :: \x1B[33m{s}\x1B[0m\n\n", .{ i, t.in });
 
         var output = try std.ArrayListUnmanaged(Token).initCapacity(std.testing.allocator, t.ex.len);
         defer output.deinit(std.testing.allocator);
 
         const result = TokenizeUnicode(&output, t.in, BUF_SIZE_TOK);
 
-        if (t.err) |e| {
-            try std.testing.expectError(e, result);
-        } else {
-            try result;
+        try std.testing.expectEqual(t.err orelse {}, result);
+        if (t.err == null) {
             try std.testing.expectEqual(t.ex.len, output.items.len);
             try std.testing.expectEqualDeep(t.ex, output.items);
         }

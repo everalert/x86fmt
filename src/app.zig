@@ -264,13 +264,18 @@ test "Main" {
     const loop_arena_alloc = arena.allocator();
 
     inline for (test_cases, 0..) |t, i| {
-        //errdefer std.debug.print("FAILED {d:0>2} :: {any}\n\n", .{ i, t.cmd });
-        errdefer std.debug.print("FAILED {d:0>2}\n\n", .{i});
-        defer _ = loop_arena.reset(.retain_capacity);
-        defer tmpdir.dir.deleteFile(error_file) catch {};
-        defer tmpdir.dir.deleteFile(input_file) catch {};
-        defer tmpdir.dir.deleteFile(output_file_buf) catch {};
-        defer tmpdir.dir.deleteFile(output_file_disk) catch {};
+        errdefer {
+            const input = std.mem.join(alloc, " ", t.cmd) catch |err| @errorName(err);
+            defer alloc.free(input);
+            std.debug.print("FAILED {d:0>2} :: \x1B[33m{s}\x1B[0m\n\n", .{ i, input });
+        }
+        defer {
+            _ = loop_arena.reset(.retain_capacity);
+            tmpdir.dir.deleteFile(error_file) catch {};
+            tmpdir.dir.deleteFile(input_file) catch {};
+            tmpdir.dir.deleteFile(output_file_buf) catch {};
+            tmpdir.dir.deleteFile(output_file_disk) catch {};
+        }
 
         {
             const input = blk: {

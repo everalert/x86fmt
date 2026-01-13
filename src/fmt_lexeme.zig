@@ -124,10 +124,8 @@ test "Parse" {
 
         const result = ParseTokens(&output, t.in);
 
-        if (t.err) |e| {
-            try std.testing.expectError(e, result);
-        } else {
-            try result;
+        try std.testing.expectEqual(t.err orelse {}, result);
+        if (t.err == null) {
             try std.testing.expectEqual(t.ex.len, output.items.len);
             try std.testing.expectEqualDeep(t.ex, output.items);
         }

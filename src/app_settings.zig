@@ -487,10 +487,13 @@ test "Settings" {
     };
 
     std.testing.log_level = .debug;
+    const alloc = std.testing.allocator;
     for (test_cases, 0..) |t, i| {
-        //errdefer std.debug.print("FAILED {d:0>2} :: {any}\n\n", .{ i, t.in });
-        errdefer std.debug.print("FAILED {d:0>2}\n\n", .{i});
-        const alloc = std.testing.allocator;
+        errdefer {
+            const input = std.mem.join(alloc, " ", t.in) catch |err| @errorName(err);
+            defer alloc.free(input);
+            std.debug.print("FAILED {d:0>2} :: \x1B[33m{s}\x1B[0m\n\n", .{ i, input });
+        }
 
         var settings: AppSettings = .default;
         const result = settings.ParseArguments(alloc, t.in);

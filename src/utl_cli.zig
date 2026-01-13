@@ -341,8 +341,6 @@ inline fn user_value_assign(comptime T: type, opt: *T, args: []const []const u8)
 
 // FIXME: review todos/fixmes in app_settings.zig to see if any contain
 //  possible tests to add here
-// TODO: need to update other error-able tests generally with the same setup as
-//  here, figured out some stuff for better tests that aren't propagated yet.
 // FIXME: don't really like how all the tests use the same reference impl, seems
 //  brittle; at least think about it a bit more before deciding to drop this fixme
 //  or punt or whatever
